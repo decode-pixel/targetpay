@@ -1,16 +1,25 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { Plus, Loader2 } from 'lucide-react';
+import { Plus, Loader2, Download } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import AppLayout from '@/components/layout/AppLayout';
 import ExpenseList from '@/components/expenses/ExpenseList';
 import ExpenseFormDialog from '@/components/expenses/ExpenseFormDialog';
 import ExpenseFiltersBar from '@/components/expenses/ExpenseFiltersBar';
 import { useExpenses } from '@/hooks/useExpenses';
+import { useCategories } from '@/hooks/useCategories';
 import { Expense, ExpenseFilters } from '@/types/expense';
 import { useAuth } from '@/contexts/AuthContext';
+import { exportExpensesToCSV, exportExpensesSummaryToCSV } from '@/lib/exportCSV';
+import { toast } from 'sonner';
 
 export default function Expenses() {
   const { user, loading } = useAuth();
@@ -32,10 +41,30 @@ export default function Expenses() {
   }, [searchParams]);
 
   const { data: expenses = [], isLoading } = useExpenses(filters);
+  const { data: categories = [] } = useCategories();
 
   const handleEditExpense = (expense: Expense) => {
     setEditingExpense(expense);
     setExpenseDialogOpen(true);
+  };
+
+  const handleExportCSV = () => {
+    if (expenses.length === 0) {
+      toast.error('No expenses to export');
+      return;
+    }
+    const monthLabel = filters.month ? format(new Date(filters.month + '-01'), 'MMM-yyyy') : 'all';
+    exportExpensesToCSV(expenses, `expenses-${monthLabel}.csv`);
+    toast.success('Expenses exported successfully');
+  };
+
+  const handleExportSummary = () => {
+    if (expenses.length === 0) {
+      toast.error('No expenses to export');
+      return;
+    }
+    exportExpensesSummaryToCSV(expenses, categories);
+    toast.success('Summary exported successfully');
   };
 
   const totalAmount = expenses.reduce((sum, exp) => sum + Number(exp.amount), 0);
@@ -73,10 +102,28 @@ export default function Expenses() {
               Manage and track your expenses
             </p>
           </div>
-          <Button onClick={() => setExpenseDialogOpen(true)} className="gap-2">
-            <Plus className="h-4 w-4" />
-            Add Expense
-          </Button>
+          <div className="flex items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="gap-2" disabled={expenses.length === 0}>
+                  <Download className="h-4 w-4" />
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleExportCSV}>
+                  Export Expenses (CSV)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleExportSummary}>
+                  Export Summary (CSV)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button onClick={() => setExpenseDialogOpen(true)} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Add Expense
+            </Button>
+          </div>
         </div>
 
         {/* Filters */}

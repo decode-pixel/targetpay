@@ -1,0 +1,197 @@
+import { useState } from 'react';
+import { format } from 'date-fns';
+import { 
+  Pencil, 
+  Trash2, 
+  MoreHorizontal,
+  Banknote,
+  Smartphone,
+  CreditCard,
+  Building2,
+  Wallet
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Expense, PaymentMethod } from '@/types/expense';
+import { useDeleteExpense } from '@/hooks/useExpenses';
+import DynamicIcon from '@/components/ui/DynamicIcon';
+import { cn } from '@/lib/utils';
+
+interface ExpenseListProps {
+  expenses: Expense[];
+  onEdit: (expense: Expense) => void;
+}
+
+const paymentIcons: Record<PaymentMethod, React.ReactNode> = {
+  cash: <Banknote className="h-3.5 w-3.5" />,
+  upi: <Smartphone className="h-3.5 w-3.5" />,
+  card: <CreditCard className="h-3.5 w-3.5" />,
+  bank: <Building2 className="h-3.5 w-3.5" />,
+  wallet: <Wallet className="h-3.5 w-3.5" />,
+};
+
+export default function ExpenseList({ expenses, onEdit }: ExpenseListProps) {
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const deleteExpense = useDeleteExpense();
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  };
+
+  const handleDelete = async () => {
+    if (deleteId) {
+      await deleteExpense.mutateAsync(deleteId);
+      setDeleteId(null);
+    }
+  };
+
+  if (expenses.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mb-4">
+          <Wallet className="h-8 w-8 text-muted-foreground" />
+        </div>
+        <h3 className="text-lg font-medium mb-1">No expenses found</h3>
+        <p className="text-muted-foreground text-sm">
+          Add your first expense to start tracking
+        </p>
+      </div>
+    );
+  }
+
+  // Group expenses by date
+  const groupedExpenses = expenses.reduce((groups, expense) => {
+    const date = expense.date;
+    if (!groups[date]) {
+      groups[date] = [];
+    }
+    groups[date].push(expense);
+    return groups;
+  }, {} as Record<string, Expense[]>);
+
+  return (
+    <>
+      <div className="space-y-6">
+        {Object.entries(groupedExpenses).map(([date, dayExpenses]) => (
+          <div key={date}>
+            <h3 className="text-sm font-medium text-muted-foreground mb-3">
+              {format(new Date(date), 'EEEE, MMMM d, yyyy')}
+            </h3>
+            <div className="space-y-2">
+              {dayExpenses.map((expense) => (
+                <div
+                  key={expense.id}
+                  className="expense-row group"
+                >
+                  {/* Category Icon */}
+                  <div
+                    className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0"
+                    style={{ backgroundColor: expense.category?.color + '20' }}
+                  >
+                    <DynamicIcon
+                      name={expense.category?.icon || 'tag'}
+                      className="h-5 w-5"
+                      style={{ color: expense.category?.color }}
+                    />
+                  </div>
+
+                  {/* Details */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium truncate">
+                        {expense.category?.name || 'Uncategorized'}
+                      </p>
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground px-1.5 py-0.5 rounded bg-muted">
+                        {paymentIcons[expense.payment_method]}
+                        <span className="capitalize">{expense.payment_method}</span>
+                      </span>
+                    </div>
+                    {expense.note && (
+                      <p className="text-sm text-muted-foreground truncate mt-0.5">
+                        {expense.note}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Amount */}
+                  <div className="text-right shrink-0">
+                    <p className="font-semibold tabular-nums text-destructive">
+                      -{formatCurrency(Number(expense.amount))}
+                    </p>
+                  </div>
+
+                  {/* Actions */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => onEdit(expense)}>
+                        <Pencil className="mr-2 h-4 w-4" />
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setDeleteId(expense.id)}
+                        className="text-destructive"
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete expense?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This expense will be permanently deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}

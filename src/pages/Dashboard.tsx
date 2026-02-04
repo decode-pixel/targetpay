@@ -8,6 +8,7 @@ import StatCards from '@/components/dashboard/StatCards';
 import CategoryPieChart from '@/components/dashboard/CategoryPieChart';
 import CategoryBarChart from '@/components/dashboard/CategoryBarChart';
 import MonthlyTrendChart from '@/components/dashboard/MonthlyTrendChart';
+import MonthYearPicker from '@/components/dashboard/MonthYearPicker';
 import ExpenseList from '@/components/expenses/ExpenseList';
 import ExpenseFormDialog from '@/components/expenses/ExpenseFormDialog';
 import { useExpenses } from '@/hooks/useExpenses';
@@ -18,7 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 export default function Dashboard() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
-  const [selectedMonth] = useState(format(new Date(), 'yyyy-MM'));
+  const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
@@ -50,17 +51,23 @@ export default function Dashboard() {
     <AppLayout>
       <div className="space-y-6 animate-fade-in">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold">Dashboard</h1>
             <p className="text-muted-foreground">
-              {format(new Date(), 'EEEE, MMMM d, yyyy')}
+              Track your monthly expenses
             </p>
           </div>
-          <Button onClick={() => setExpenseDialogOpen(true)} className="gap-2">
-            <Plus className="h-4 w-4" />
-            Add Expense
-          </Button>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+            <MonthYearPicker 
+              value={selectedMonth} 
+              onChange={setSelectedMonth} 
+            />
+            <Button onClick={() => setExpenseDialogOpen(true)} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Add Expense
+            </Button>
+          </div>
         </div>
 
         {/* Stats */}
@@ -81,7 +88,9 @@ export default function Dashboard() {
         {/* Recent Expenses */}
         <Card className="border-border/50">
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-lg">Recent Expenses</CardTitle>
+            <CardTitle className="text-lg">
+              Expenses for {format(new Date(`${selectedMonth}-01`), 'MMMM yyyy')}
+            </CardTitle>
             <Button 
               variant="ghost" 
               size="sm"
@@ -94,6 +103,10 @@ export default function Dashboard() {
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : expenses.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                No expenses for this month
               </div>
             ) : (
               <ExpenseList 

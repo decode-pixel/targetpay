@@ -3,6 +3,26 @@ import { supabase } from '@/integrations/supabase/client';
 import { Expense, ExpenseFilters, PaymentMethod } from '@/types/expense';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { z } from 'zod';
+
+// Validation schema for search input - prevents query abuse and performance issues
+const searchSchema = z.string().max(100).regex(/^[a-zA-Z0-9\s\-_.,!?₹$€£¥@#%&*()]*$/).optional();
+
+// Sanitize search input by removing potentially problematic patterns
+function sanitizeSearchInput(input: string | undefined): string | null {
+  if (!input) return null;
+  
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  
+  try {
+    const validated = searchSchema.parse(trimmed);
+    return validated || null;
+  } catch {
+    // If validation fails, return null to skip the search filter
+    return null;
+  }
+}
 
 export function useExpenses(filters?: ExpenseFilters) {
   const { user } = useAuth();
@@ -45,8 +65,10 @@ export function useExpenses(filters?: ExpenseFilters) {
         query = query.lte('date', filters.dateTo);
       }
 
-      if (filters?.search) {
-        query = query.ilike('note', `%${filters.search}%`);
+      // Validate and sanitize search input before querying
+      const sanitizedSearch = sanitizeSearchInput(filters?.search);
+      if (sanitizedSearch) {
+        query = query.ilike('note', `%${sanitizedSearch}%`);
       }
 
       const { data, error } = await query;

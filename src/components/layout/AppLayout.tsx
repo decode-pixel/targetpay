@@ -57,7 +57,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-primary">
               <Wallet className="h-5 w-5 text-primary-foreground" />
             </div>
-            <span className="font-semibold text-lg hidden sm:block">ExpenseWise</span>
+            <span className="font-semibold text-lg hidden sm:block">Happy Money</span>
           </Link>
 
           {/* Desktop Navigation */}

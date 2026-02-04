@@ -114,7 +114,7 @@ export default function Auth() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-primary mb-4">
             <Wallet className="h-8 w-8 text-primary-foreground" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">ExpenseWise</h1>
+          <h1 className="text-2xl font-bold text-foreground">Happy Money</h1>
           <p className="text-muted-foreground mt-1">Track your expenses smartly</p>
         </div>
 

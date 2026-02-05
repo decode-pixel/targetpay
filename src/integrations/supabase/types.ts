@@ -47,6 +47,44 @@ export type Database = {
         }
         Relationships: []
       }
+      category_mappings: {
+        Row: {
+          category_id: string
+          created_at: string
+          id: string
+          keyword: string
+          updated_at: string
+          usage_count: number | null
+          user_id: string
+        }
+        Insert: {
+          category_id: string
+          created_at?: string
+          id?: string
+          keyword: string
+          updated_at?: string
+          usage_count?: number | null
+          user_id: string
+        }
+        Update: {
+          category_id?: string
+          created_at?: string
+          id?: string
+          keyword?: string
+          updated_at?: string
+          usage_count?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "category_mappings_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       expense_drafts: {
         Row: {
           amount: number | null
@@ -135,12 +173,146 @@ export type Database = {
           },
         ]
       }
+      extracted_transactions: {
+        Row: {
+          ai_confidence: number | null
+          amount: number
+          balance: number | null
+          created_at: string
+          description: string
+          duplicate_of: string | null
+          id: string
+          import_id: string
+          is_duplicate: boolean | null
+          is_selected: boolean | null
+          raw_text: string | null
+          suggested_category_id: string | null
+          transaction_date: string
+          transaction_type: string
+          user_id: string
+        }
+        Insert: {
+          ai_confidence?: number | null
+          amount: number
+          balance?: number | null
+          created_at?: string
+          description: string
+          duplicate_of?: string | null
+          id?: string
+          import_id: string
+          is_duplicate?: boolean | null
+          is_selected?: boolean | null
+          raw_text?: string | null
+          suggested_category_id?: string | null
+          transaction_date: string
+          transaction_type: string
+          user_id: string
+        }
+        Update: {
+          ai_confidence?: number | null
+          amount?: number
+          balance?: number | null
+          created_at?: string
+          description?: string
+          duplicate_of?: string | null
+          id?: string
+          import_id?: string
+          is_duplicate?: boolean | null
+          is_selected?: boolean | null
+          raw_text?: string | null
+          suggested_category_id?: string | null
+          transaction_date?: string
+          transaction_type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extracted_transactions_duplicate_of_fkey"
+            columns: ["duplicate_of"]
+            isOneToOne: false
+            referencedRelation: "expenses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "extracted_transactions_import_id_fkey"
+            columns: ["import_id"]
+            isOneToOne: false
+            referencedRelation: "statement_imports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "extracted_transactions_suggested_category_id_fkey"
+            columns: ["suggested_category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      statement_imports: {
+        Row: {
+          bank_name: string | null
+          created_at: string
+          error_message: string | null
+          expires_at: string
+          file_hash: string
+          file_name: string
+          file_path: string
+          id: string
+          imported_transactions: number | null
+          statement_period_end: string | null
+          statement_period_start: string | null
+          status: string
+          total_transactions: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          bank_name?: string | null
+          created_at?: string
+          error_message?: string | null
+          expires_at?: string
+          file_hash: string
+          file_name: string
+          file_path: string
+          id?: string
+          imported_transactions?: number | null
+          statement_period_end?: string | null
+          statement_period_start?: string | null
+          status?: string
+          total_transactions?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          bank_name?: string | null
+          created_at?: string
+          error_message?: string | null
+          expires_at?: string
+          file_hash?: string
+          file_name?: string
+          file_path?: string
+          id?: string
+          imported_transactions?: number | null
+          statement_period_end?: string | null
+          statement_period_start?: string | null
+          status?: string
+          total_transactions?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      cleanup_expired_imports: { Args: never; Returns: undefined }
+      increment_mapping_count: {
+        Args: { p_keyword: string; p_user_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       payment_method: "cash" | "upi" | "card" | "bank" | "wallet"

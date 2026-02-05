@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { Plus, Loader2, Download } from 'lucide-react';
+import { Plus, Loader2, Download, Upload } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -14,6 +14,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import ExpenseList from '@/components/expenses/ExpenseList';
 import ExpenseFormDialog from '@/components/expenses/ExpenseFormDialog';
 import ExpenseFiltersBar from '@/components/expenses/ExpenseFiltersBar';
+import ImportWizardDialog from '@/components/import/ImportWizardDialog';
 import { useExpenses } from '@/hooks/useExpenses';
 import { useCategories } from '@/hooks/useCategories';
 import { Expense, ExpenseFilters } from '@/types/expense';
@@ -27,6 +28,7 @@ export default function Expenses() {
   const [searchParams] = useSearchParams();
   
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [filters, setFilters] = useState<ExpenseFilters>({
     month: format(new Date(), 'yyyy-MM'),
@@ -103,6 +105,14 @@ export default function Expenses() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              className="gap-2"
+              onClick={() => setImportDialogOpen(true)}
+            >
+              <Upload className="h-4 w-4" />
+              Import Statement
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="gap-2" disabled={expenses.length === 0}>
@@ -172,6 +182,12 @@ export default function Expenses() {
           if (!open) setEditingExpense(null);
         }}
         expense={editingExpense}
+      />
+
+      {/* Import Wizard Dialog */}
+      <ImportWizardDialog
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
       />
     </AppLayout>
   );

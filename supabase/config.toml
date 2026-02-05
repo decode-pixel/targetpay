@@ -1,1 +1,10 @@
 project_id = "jwiqytccvxoundjilaty"
+
+[functions.parse-bank-statement]
+verify_jwt = false
+
+[functions.categorize-transactions]
+verify_jwt = false
+
+[functions.import-transactions]
+verify_jwt = false

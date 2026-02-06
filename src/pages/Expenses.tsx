@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import AppLayout from '@/components/layout/AppLayout';
+import FloatingAddButton from '@/components/layout/FloatingAddButton';
 import ExpenseList from '@/components/expenses/ExpenseList';
 import ExpenseFormDialog from '@/components/expenses/ExpenseFormDialog';
 import ExpenseFiltersBar from '@/components/expenses/ExpenseFiltersBar';
@@ -21,10 +22,12 @@ import { Expense, ExpenseFilters } from '@/types/expense';
 import { useAuth } from '@/contexts/AuthContext';
 import { exportExpensesToCSV, exportExpensesSummaryToCSV } from '@/lib/exportCSV';
 import { toast } from 'sonner';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 export default function Expenses() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [searchParams] = useSearchParams();
   
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
@@ -95,29 +98,36 @@ export default function Expenses() {
 
   return (
     <AppLayout>
-      <div className="space-y-6 animate-fade-in">
+      <div className="space-y-4 md:space-y-6 animate-fade-in">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold">Expenses</h1>
-            <p className="text-muted-foreground">
+            <h1 className="text-xl md:text-2xl font-bold">Expenses</h1>
+            <p className="text-sm text-muted-foreground">
               Manage and track your expenses
             </p>
           </div>
           <div className="flex items-center gap-2">
             <Button 
               variant="outline" 
+              size={isMobile ? "sm" : "default"}
               className="gap-2"
               onClick={() => setImportDialogOpen(true)}
             >
               <Upload className="h-4 w-4" />
-              Import Statement
+              <span className="hidden sm:inline">Import Statement</span>
+              <span className="sm:hidden">Import</span>
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="gap-2" disabled={expenses.length === 0}>
+                <Button 
+                  variant="outline" 
+                  size={isMobile ? "sm" : "default"}
+                  className="gap-2" 
+                  disabled={expenses.length === 0}
+                >
                   <Download className="h-4 w-4" />
-                  Export
+                  <span className="hidden sm:inline">Export</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -129,10 +139,13 @@ export default function Expenses() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button onClick={() => setExpenseDialogOpen(true)} className="gap-2">
-              <Plus className="h-4 w-4" />
-              Add Expense
-            </Button>
+            {/* Desktop add button */}
+            {!isMobile && (
+              <Button onClick={() => setExpenseDialogOpen(true)} className="gap-2">
+                <Plus className="h-4 w-4" />
+                Add Expense
+              </Button>
+            )}
           </div>
         </div>
 
@@ -143,15 +156,15 @@ export default function Expenses() {
         />
 
         {/* Summary */}
-        <div className="flex items-center justify-between p-4 bg-card rounded-lg border border-border/50">
+        <div className="flex items-center justify-between p-3 md:p-4 bg-card rounded-lg border border-border/50">
           <div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs md:text-sm text-muted-foreground">
               {expenses.length} expense{expenses.length !== 1 ? 's' : ''} found
             </p>
           </div>
           <div className="text-right">
-            <p className="text-sm text-muted-foreground">Total</p>
-            <p className="text-xl font-bold tabular-nums text-destructive">
+            <p className="text-xs md:text-sm text-muted-foreground">Total</p>
+            <p className="text-lg md:text-xl font-bold tabular-nums text-destructive">
               -{formatCurrency(totalAmount)}
             </p>
           </div>
@@ -159,7 +172,7 @@ export default function Expenses() {
 
         {/* Expense List */}
         <Card className="border-border/50">
-          <CardContent className="pt-6">
+          <CardContent className="pt-4 md:pt-6 px-3 md:px-6">
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -173,6 +186,11 @@ export default function Expenses() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Floating Add Button (mobile only) */}
+      {isMobile && (
+        <FloatingAddButton onClick={() => setExpenseDialogOpen(true)} />
+      )}
 
       {/* Expense Form Dialog */}
       <ExpenseFormDialog

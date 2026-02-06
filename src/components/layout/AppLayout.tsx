@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
+import MobileNav from './MobileNav';
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -48,16 +49,16 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const userInitials = user?.email?.slice(0, 2).toUpperCase() || 'U';
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background pb-20 md:pb-0">
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 items-center justify-between">
+        <div className="container flex h-14 md:h-16 items-center justify-between px-4">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-primary">
-              <Wallet className="h-5 w-5 text-primary-foreground" />
+            <div className="flex h-8 w-8 md:h-9 md:w-9 items-center justify-center rounded-lg bg-gradient-primary">
+              <Wallet className="h-4 w-4 md:h-5 md:w-5 text-primary-foreground" />
             </div>
-            <span className="font-semibold text-lg hidden sm:block">Happy Money</span>
+            <span className="font-semibold text-base md:text-lg">Happy Money</span>
           </Link>
 
           {/* Desktop Navigation */}
@@ -88,16 +89,16 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <ThemeToggle />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="gap-2">
+                <Button variant="ghost" size="sm" className="gap-2 h-9 px-2">
                   <Avatar className="h-7 w-7">
                     <AvatarFallback className="bg-primary text-primary-foreground text-xs">
                       {userInitials}
                     </AvatarFallback>
                   </Avatar>
-                  <span className="hidden sm:block text-sm max-w-[120px] truncate">
+                  <span className="hidden sm:block text-sm max-w-[100px] truncate">
                     {user?.email}
                   </span>
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  <ChevronDown className="h-4 w-4 text-muted-foreground hidden sm:block" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
@@ -112,49 +113,17 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-
-            {/* Mobile Menu Toggle */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="md:hidden"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            >
-              {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-            </Button>
           </div>
         </div>
-
-        {/* Mobile Navigation */}
-        {mobileMenuOpen && (
-          <nav className="md:hidden border-t border-border/50 p-4 space-y-1 animate-fade-in">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = location.pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  to={item.href}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  <Button
-                    variant={isActive ? 'secondary' : 'ghost'}
-                    className="w-full justify-start gap-2"
-                  >
-                    <Icon className="h-4 w-4" />
-                    {item.label}
-                  </Button>
-                </Link>
-              );
-            })}
-          </nav>
-        )}
       </header>
 
       {/* Main Content */}
-      <main className="container py-6">
+      <main className="container py-4 md:py-6 px-4">
         {children}
       </main>
+
+      {/* Mobile Bottom Navigation */}
+      <MobileNav />
     </div>
   );
 }

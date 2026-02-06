@@ -7,12 +7,9 @@ import {
   CheckCircle2, 
   XCircle, 
   ChevronRight,
-  ChevronLeft,
-  Sparkles,
-  ArrowRight
+  Sparkles
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
@@ -22,6 +19,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+} from '@/components/ui/drawer';
 import StatementUploader from './StatementUploader';
 import TransactionPreview from './TransactionPreview';
 import { ImportWizardStep, ExtractedTransaction } from '@/types/import';
@@ -37,6 +41,7 @@ import {
   useDeleteImport,
 } from '@/hooks/useStatementImport';
 import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface ImportWizardDialogProps {
   open: boolean;
@@ -53,6 +58,7 @@ const STEPS: { key: ImportWizardStep; label: string; icon: React.ReactNode }[] =
 
 export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardDialogProps) {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [step, setStep] = useState<ImportWizardStep>('upload');
   const [importId, setImportId] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -97,7 +103,6 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
         refetchTransactions();
         break;
       case 'failed':
-        // Stay on current step and show error
         break;
     }
   }, [importRecord?.status, refetchTransactions]);
@@ -105,7 +110,6 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
   const handleUpload = async (file: File) => {
     setUploadProgress(0);
     
-    // Simulate progress
     const progressInterval = setInterval(() => {
       setUploadProgress(prev => Math.min(prev + 10, 90));
     }, 200);
@@ -115,7 +119,6 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
       setImportId(result.id);
       setUploadProgress(100);
       
-      // Start parsing
       setStep('processing');
       await parseMutation.mutateAsync(result.id);
     } catch (error) {
@@ -134,7 +137,6 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
   const handleImport = async () => {
     if (!importId) return;
 
-    // Prepare transaction updates (category changes)
     const transactionUpdates = localTransactions
       .filter(t => t.is_selected)
       .map(t => ({
@@ -170,7 +172,6 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
     setLocalTransactions(prev => 
       prev.map(t => t.id === id ? { ...t, ...updates } : t)
     );
-    // Also persist to database
     updateTransaction.mutate({ id, ...updates } as any);
   }, [updateTransaction]);
 
@@ -185,7 +186,6 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
     setLocalTransactions(prev =>
       prev.map(t => ({ ...t, is_selected: selected }))
     );
-    // Batch update - in production you'd want a dedicated endpoint
     localTransactions.forEach(t => {
       updateTransaction.mutate({ id: t.id, is_selected: selected } as any);
     });
@@ -207,10 +207,194 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
 
   const currentStepIndex = STEPS.findIndex(s => s.key === step);
 
+  const content = (
+    <>
+      {/* Progress steps - simplified for mobile */}
+      <div className="flex items-center justify-between px-2 md:px-4 py-2 bg-muted/30 rounded-lg mb-4 overflow-x-auto">
+        {STEPS.map((s, index) => (
+          <div 
+            key={s.key}
+            className={cn(
+              'flex items-center gap-1 md:gap-2 shrink-0',
+              index <= currentStepIndex ? 'text-primary' : 'text-muted-foreground'
+            )}
+          >
+            <div className={cn(
+              'w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-xs md:text-sm font-medium',
+              index < currentStepIndex && 'bg-primary text-primary-foreground',
+              index === currentStepIndex && 'bg-primary/20 text-primary border-2 border-primary',
+              index > currentStepIndex && 'bg-muted'
+            )}>
+              {index < currentStepIndex ? (
+                <CheckCircle2 className="h-4 w-4" />
+              ) : (
+                s.icon
+              )}
+            </div>
+            <span className="text-xs md:text-sm font-medium hidden sm:inline">{s.label}</span>
+            {index < STEPS.length - 1 && (
+              <ChevronRight className="h-3 w-3 md:h-4 md:w-4 text-muted-foreground mx-1" />
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto">
+        {step === 'upload' && (
+          <StatementUploader
+            onUpload={handleUpload}
+            isUploading={uploadMutation.isPending}
+            uploadProgress={uploadProgress}
+          />
+        )}
+
+        {step === 'processing' && (
+          <div className="text-center py-8 md:py-12 space-y-4 md:space-y-6">
+            <Loader2 className="h-12 w-12 md:h-16 md:w-16 mx-auto text-primary animate-spin" />
+            <div className="space-y-2">
+              <h3 className="text-base md:text-lg font-semibold">
+                {parseMutation.isPending ? 'Extracting transactions...' : 'Processing...'}
+              </h3>
+              <p className="text-sm text-muted-foreground px-4">
+                Using AI to read and extract transactions from your statement
+              </p>
+              {importRecord?.bank_name && (
+                <p className="text-sm text-primary">
+                  Detected: {importRecord.bank_name} Bank Statement
+                </p>
+              )}
+            </div>
+            {importRecord?.status === 'failed' && (
+              <Alert variant="destructive" className="max-w-md mx-auto">
+                <XCircle className="h-4 w-4" />
+                <AlertTitle>Extraction Failed</AlertTitle>
+                <AlertDescription>
+                  {importRecord.error_message || 'Failed to extract transactions from the statement'}
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
+        )}
+
+        {(step === 'preview' || step === 'confirm') && (
+          <div className="space-y-4">
+            {importRecord && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-primary/5 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <FileText className="h-5 w-5 text-primary shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm truncate">{importRecord.file_name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {importRecord.bank_name || 'Unknown Bank'} • {importRecord.total_transactions} transactions
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <TransactionPreview
+              transactions={localTransactions}
+              categories={categories}
+              onTransactionUpdate={handleTransactionUpdate}
+              onSelectionChange={handleSelectionChange}
+              onSelectAll={handleSelectAll}
+              showCategories={step === 'confirm'}
+            />
+          </div>
+        )}
+
+        {step === 'categorize' && (
+          <div className="text-center py-8 md:py-12 space-y-4 md:space-y-6">
+            <div className="relative">
+              <Sparkles className="h-12 w-12 md:h-16 md:w-16 mx-auto text-primary animate-pulse" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-base md:text-lg font-semibold">AI Categorization in Progress</h3>
+              <p className="text-sm text-muted-foreground px-4">
+                Analyzing transactions and assigning categories
+              </p>
+            </div>
+            <Progress value={categorizeMutation.isPending ? 60 : 100} className="w-48 mx-auto" />
+          </div>
+        )}
+      </div>
+
+      {/* Footer actions */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t mt-4">
+        <Button variant="ghost" onClick={handleCancel} className="order-2 sm:order-1">
+          Cancel
+        </Button>
+
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 order-1 sm:order-2">
+          {step === 'preview' && (
+            <Button 
+              onClick={handleCategorize} 
+              disabled={categorizeMutation.isPending}
+              className="w-full sm:w-auto"
+            >
+              <Sparkles className="h-4 w-4 mr-2" />
+              Categorize with AI
+              <ChevronRight className="h-4 w-4 ml-2" />
+            </Button>
+          )}
+
+          {step === 'confirm' && (
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <div className="text-center sm:text-right">
+                <p className="text-xs text-muted-foreground">
+                  Importing {selectedCount} transactions
+                </p>
+                <p className="font-semibold text-destructive text-sm">
+                  Total: {formatCurrency(totalAmount)}
+                </p>
+              </div>
+              <Button 
+                onClick={handleImport} 
+                disabled={importMutation.isPending || selectedCount === 0}
+                className="gap-2 w-full sm:w-auto"
+              >
+                {importMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4" />
+                )}
+                Import Expenses
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+
+  if (isMobile) {
+    return (
+      <Drawer open={open} onOpenChange={(isOpen) => {
+        if (!isOpen && step !== 'upload') {
+          handleCancel();
+        } else {
+          onOpenChange(isOpen);
+        }
+      }}>
+        <DrawerContent className="max-h-[95vh] flex flex-col">
+          <DrawerHeader className="text-left">
+            <DrawerTitle>Import Bank Statement</DrawerTitle>
+            <DrawerDescription>
+              Upload to extract and categorize expenses
+            </DrawerDescription>
+          </DrawerHeader>
+          <div className="flex-1 overflow-y-auto px-4 pb-4">
+            {content}
+          </div>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
   return (
     <Dialog open={open} onOpenChange={(isOpen) => {
       if (!isOpen && step !== 'upload') {
-        // Ask confirmation before closing mid-wizard
         handleCancel();
       } else {
         onOpenChange(isOpen);
@@ -223,169 +407,7 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
             Upload your bank statement to automatically extract and categorize expenses
           </DialogDescription>
         </DialogHeader>
-
-        {/* Progress steps */}
-        <div className="flex items-center justify-between px-4 py-2 bg-muted/30 rounded-lg">
-          {STEPS.map((s, index) => (
-            <div 
-              key={s.key}
-              className={cn(
-                'flex items-center gap-2',
-                index <= currentStepIndex ? 'text-primary' : 'text-muted-foreground'
-              )}
-            >
-              <div className={cn(
-                'w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium',
-                index < currentStepIndex && 'bg-primary text-primary-foreground',
-                index === currentStepIndex && 'bg-primary/20 text-primary border-2 border-primary',
-                index > currentStepIndex && 'bg-muted'
-              )}>
-                {index < currentStepIndex ? (
-                  <CheckCircle2 className="h-5 w-5" />
-                ) : (
-                  s.icon
-                )}
-              </div>
-              <span className="text-sm font-medium hidden sm:inline">{s.label}</span>
-              {index < STEPS.length - 1 && (
-                <ChevronRight className="h-4 w-4 text-muted-foreground mx-2" />
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto py-4">
-          {step === 'upload' && (
-            <StatementUploader
-              onUpload={handleUpload}
-              isUploading={uploadMutation.isPending}
-              uploadProgress={uploadProgress}
-            />
-          )}
-
-          {step === 'processing' && (
-            <div className="text-center py-12 space-y-6">
-              <Loader2 className="h-16 w-16 mx-auto text-primary animate-spin" />
-              <div className="space-y-2">
-                <h3 className="text-lg font-semibold">
-                  {parseMutation.isPending ? 'Extracting transactions...' : 'Processing...'}
-                </h3>
-                <p className="text-muted-foreground">
-                  Using AI to read and extract transactions from your statement
-                </p>
-                {importRecord?.bank_name && (
-                  <p className="text-sm text-primary">
-                    Detected: {importRecord.bank_name} Bank Statement
-                  </p>
-                )}
-              </div>
-              {importRecord?.status === 'failed' && (
-                <Alert variant="destructive" className="max-w-md mx-auto">
-                  <XCircle className="h-4 w-4" />
-                  <AlertTitle>Extraction Failed</AlertTitle>
-                  <AlertDescription>
-                    {importRecord.error_message || 'Failed to extract transactions from the statement'}
-                  </AlertDescription>
-                </Alert>
-              )}
-            </div>
-          )}
-
-          {(step === 'preview' || step === 'confirm') && (
-            <div className="space-y-4">
-              {importRecord && (
-                <div className="flex items-center justify-between p-3 bg-primary/5 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <FileText className="h-5 w-5 text-primary" />
-                    <div>
-                      <p className="font-medium">{importRecord.file_name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {importRecord.bank_name || 'Unknown Bank'} • 
-                        {importRecord.total_transactions} transactions found
-                      </p>
-                    </div>
-                  </div>
-                  {importRecord.statement_period_start && importRecord.statement_period_end && (
-                    <div className="text-right text-sm text-muted-foreground">
-                      <p>Statement Period</p>
-                      <p className="font-medium text-foreground">
-                        {new Date(importRecord.statement_period_start).toLocaleDateString()} - 
-                        {new Date(importRecord.statement_period_end).toLocaleDateString()}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <TransactionPreview
-                transactions={localTransactions}
-                categories={categories}
-                onTransactionUpdate={handleTransactionUpdate}
-                onSelectionChange={handleSelectionChange}
-                onSelectAll={handleSelectAll}
-                showCategories={step === 'confirm'}
-              />
-            </div>
-          )}
-
-          {step === 'categorize' && (
-            <div className="text-center py-12 space-y-6">
-              <div className="relative">
-                <Sparkles className="h-16 w-16 mx-auto text-primary animate-pulse" />
-              </div>
-              <div className="space-y-2">
-                <h3 className="text-lg font-semibold">AI Categorization in Progress</h3>
-                <p className="text-muted-foreground">
-                  Analyzing transactions and assigning categories based on your spending patterns
-                </p>
-              </div>
-              <Progress value={categorizeMutation.isPending ? 60 : 100} className="w-48 mx-auto" />
-            </div>
-          )}
-        </div>
-
-        {/* Footer actions */}
-        <div className="flex items-center justify-between pt-4 border-t">
-          <Button variant="ghost" onClick={handleCancel}>
-            Cancel
-          </Button>
-
-          <div className="flex items-center gap-3">
-            {step === 'preview' && (
-              <Button onClick={handleCategorize} disabled={categorizeMutation.isPending}>
-                <Sparkles className="h-4 w-4 mr-2" />
-                Categorize with AI
-                <ChevronRight className="h-4 w-4 ml-2" />
-              </Button>
-            )}
-
-            {step === 'confirm' && (
-              <div className="flex items-center gap-4">
-                <div className="text-right">
-                  <p className="text-sm text-muted-foreground">
-                    Importing {selectedCount} transactions
-                  </p>
-                  <p className="font-semibold text-destructive">
-                    Total: {formatCurrency(totalAmount)}
-                  </p>
-                </div>
-                <Button 
-                  onClick={handleImport} 
-                  disabled={importMutation.isPending || selectedCount === 0}
-                  className="gap-2"
-                >
-                  {importMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4" />
-                  )}
-                  Import Expenses
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
+        {content}
       </DialogContent>
     </Dialog>
   );

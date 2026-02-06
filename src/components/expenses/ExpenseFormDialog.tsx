@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { CalendarIcon } from 'lucide-react';
+import { CalendarIcon, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,6 +12,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+} from '@/components/ui/drawer';
 import {
   Select,
   SelectContent,
@@ -29,6 +35,7 @@ import { useCategories } from '@/hooks/useCategories';
 import { useCreateExpense, useUpdateExpense } from '@/hooks/useExpenses';
 import DynamicIcon from '@/components/ui/DynamicIcon';
 import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface ExpenseFormDialogProps {
   open: boolean;
@@ -40,6 +47,7 @@ export default function ExpenseFormDialog({ open, onOpenChange, expense }: Expen
   const { data: categories = [] } = useCategories();
   const createExpense = useCreateExpense();
   const updateExpense = useUpdateExpense();
+  const isMobile = useIsMobile();
 
   const [amount, setAmount] = useState('');
   const [categoryId, setCategoryId] = useState('');
@@ -50,14 +58,16 @@ export default function ExpenseFormDialog({ open, onOpenChange, expense }: Expen
   const isEditing = !!expense;
 
   useEffect(() => {
-    if (expense) {
-      setAmount(expense.amount.toString());
-      setCategoryId(expense.category_id || '');
-      setDate(new Date(expense.date));
-      setPaymentMethod(expense.payment_method);
-      setNote(expense.note || '');
-    } else {
-      resetForm();
+    if (open) {
+      if (expense) {
+        setAmount(expense.amount.toString());
+        setCategoryId(expense.category_id || '');
+        setDate(new Date(expense.date));
+        setPaymentMethod(expense.payment_method);
+        setNote(expense.note || '');
+      } else {
+        resetForm();
+      }
     }
   }, [expense, open]);
 
@@ -96,136 +106,165 @@ export default function ExpenseFormDialog({ open, onOpenChange, expense }: Expen
 
   const isSubmitting = createExpense.isPending || updateExpense.isPending;
 
+  const formContent = (
+    <form onSubmit={handleSubmit} className="space-y-4 px-1">
+      {/* Amount */}
+      <div className="space-y-2">
+        <Label htmlFor="amount">Amount *</Label>
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-lg">₹</span>
+          <Input
+            id="amount"
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder="0.00"
+            className="pl-8 h-12 text-xl font-semibold"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            autoFocus={!isMobile}
+            required
+          />
+        </div>
+      </div>
+
+      {/* Category */}
+      <div className="space-y-2">
+        <Label>Category</Label>
+        <Select value={categoryId} onValueChange={setCategoryId}>
+          <SelectTrigger className="h-11">
+            <SelectValue placeholder="Select category" />
+          </SelectTrigger>
+          <SelectContent>
+            {categories.map((cat) => (
+              <SelectItem key={cat.id} value={cat.id}>
+                <div className="flex items-center gap-2">
+                  <div
+                    className="h-5 w-5 rounded flex items-center justify-center"
+                    style={{ backgroundColor: cat.color + '30' }}
+                  >
+                    <DynamicIcon name={cat.icon} className="h-3 w-3" style={{ color: cat.color }} />
+                  </div>
+                  {cat.name}
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Date */}
+      <div className="space-y-2">
+        <Label>Date *</Label>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              className={cn(
+                'w-full justify-start text-left font-normal h-11',
+                !date && 'text-muted-foreground'
+              )}
+            >
+              <CalendarIcon className="mr-2 h-4 w-4" />
+              {date ? format(date, 'PPP') : 'Pick a date'}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+              mode="single"
+              selected={date}
+              onSelect={(d) => d && setDate(d)}
+              initialFocus
+            />
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      {/* Payment Method - Grid for touch-friendly selection */}
+      <div className="space-y-2">
+        <Label>Payment Method</Label>
+        <div className="grid grid-cols-5 gap-2">
+          {PAYMENT_METHODS.map((method) => (
+            <button
+              key={method.value}
+              type="button"
+              onClick={() => setPaymentMethod(method.value)}
+              className={cn(
+                'flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-all duration-150',
+                'border-2 touch-manipulation',
+                paymentMethod === method.value
+                  ? 'border-primary bg-primary/10'
+                  : 'border-transparent bg-muted hover:bg-muted/80'
+              )}
+            >
+              <DynamicIcon name={method.icon} className="h-5 w-5" />
+              <span className="text-xs">{method.label.split(' ')[0]}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Note */}
+      <div className="space-y-2">
+        <Label htmlFor="note">Note</Label>
+        <Textarea
+          id="note"
+          placeholder="Add a note..."
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          rows={2}
+          className="resize-none"
+        />
+      </div>
+
+      {/* Submit */}
+      <div className="flex gap-3 pt-2 pb-safe">
+        <Button
+          type="button"
+          variant="outline"
+          className="flex-1 h-12 text-base"
+          onClick={() => onOpenChange(false)}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          className="flex-1 h-12 text-base"
+          disabled={isSubmitting || !amount}
+        >
+          {isSubmitting ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Saving...
+            </>
+          ) : isEditing ? 'Update' : 'Add Expense'}
+        </Button>
+      </div>
+    </form>
+  );
+
+  if (isMobile) {
+    return (
+      <Drawer open={open} onOpenChange={onOpenChange}>
+        <DrawerContent className="max-h-[90vh]">
+          <DrawerHeader className="text-left">
+            <DrawerTitle>{isEditing ? 'Edit Expense' : 'Add Expense'}</DrawerTitle>
+          </DrawerHeader>
+          <div className="px-4 pb-4 overflow-y-auto">
+            {formContent}
+          </div>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>{isEditing ? 'Edit Expense' : 'Add Expense'}</DialogTitle>
         </DialogHeader>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Amount */}
-          <div className="space-y-2">
-            <Label htmlFor="amount">Amount *</Label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</span>
-              <Input
-                id="amount"
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="0.00"
-                className="pl-7 text-lg font-semibold"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                required
-              />
-            </div>
-          </div>
-
-          {/* Category */}
-          <div className="space-y-2">
-            <Label>Category</Label>
-            <Select value={categoryId} onValueChange={setCategoryId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select category" />
-              </SelectTrigger>
-              <SelectContent>
-                {categories.map((cat) => (
-                  <SelectItem key={cat.id} value={cat.id}>
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="h-4 w-4 rounded flex items-center justify-center"
-                        style={{ backgroundColor: cat.color + '30' }}
-                      >
-                        <DynamicIcon name={cat.icon} className="h-3 w-3" style={{ color: cat.color }} />
-                      </div>
-                      {cat.name}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Date */}
-          <div className="space-y-2">
-            <Label>Date *</Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className={cn(
-                    'w-full justify-start text-left font-normal',
-                    !date && 'text-muted-foreground'
-                  )}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {date ? format(date, 'PPP') : 'Pick a date'}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={date}
-                  onSelect={(d) => d && setDate(d)}
-                  initialFocus
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          {/* Payment Method */}
-          <div className="space-y-2">
-            <Label>Payment Method</Label>
-            <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PAYMENT_METHODS.map((method) => (
-                  <SelectItem key={method.value} value={method.value}>
-                    <div className="flex items-center gap-2">
-                      <DynamicIcon name={method.icon} className="h-4 w-4" />
-                      {method.label}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Note */}
-          <div className="space-y-2">
-            <Label htmlFor="note">Note</Label>
-            <Textarea
-              id="note"
-              placeholder="Add a note..."
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={2}
-            />
-          </div>
-
-          {/* Submit */}
-          <div className="flex gap-2 pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="flex-1"
-              onClick={() => onOpenChange(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              className="flex-1"
-              disabled={isSubmitting || !amount}
-            >
-              {isSubmitting ? 'Saving...' : isEditing ? 'Update' : 'Add Expense'}
-            </Button>
-          </div>
-        </form>
+        {formContent}
       </DialogContent>
     </Dialog>
   );

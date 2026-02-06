@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Pencil, Trash2, MoreHorizontal } from 'lucide-react';
+import { Pencil, Trash2, MoreHorizontal, ChevronRight } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import {
@@ -24,6 +25,7 @@ import { useExpenses } from '@/hooks/useExpenses';
 import DynamicIcon from '@/components/ui/DynamicIcon';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface CategoryListProps {
   categories: Category[];
@@ -33,6 +35,8 @@ interface CategoryListProps {
 export default function CategoryList({ categories, onEdit }: CategoryListProps) {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const deleteCategory = useDeleteCategory();
+  const navigate = useNavigate();
+  const isMobile = useIsMobile();
   
   const currentMonth = format(new Date(), 'yyyy-MM');
   const { data: expenses = [] } = useExpenses({ month: currentMonth });
@@ -60,10 +64,14 @@ export default function CategoryList({ categories, onEdit }: CategoryListProps) 
     }
   };
 
+  const handleViewExpenses = (categoryId: string) => {
+    navigate(`/expenses?category=${categoryId}`);
+  };
+
   if (categories.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
-        <h3 className="text-lg font-medium mb-1">No categories yet</h3>
+        <h3 className="text-base md:text-lg font-medium mb-1">No categories yet</h3>
         <p className="text-muted-foreground text-sm">
           Create categories to organize your expenses
         </p>
@@ -73,7 +81,7 @@ export default function CategoryList({ categories, onEdit }: CategoryListProps) 
 
   return (
     <>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
         {categories.map((category) => {
           const spent = categorySpending[category.id] || 0;
           const budget = Number(category.monthly_budget) || 0;
@@ -83,24 +91,32 @@ export default function CategoryList({ categories, onEdit }: CategoryListProps) 
           return (
             <div
               key={category.id}
-              className="stat-card group"
+              className={cn(
+                "bg-card rounded-xl p-4 border border-border/50 transition-all duration-200",
+                "hover:shadow-md",
+                isMobile && "active:scale-[0.98]"
+              )}
+              style={{ boxShadow: 'var(--shadow-card)' }}
             >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
+              <div className="flex items-start justify-between mb-3">
+                <div 
+                  className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                  onClick={() => handleViewExpenses(category.id)}
+                >
                   <div
-                    className="h-12 w-12 rounded-xl flex items-center justify-center"
+                    className="h-11 w-11 md:h-12 md:w-12 rounded-xl flex items-center justify-center shrink-0"
                     style={{ backgroundColor: category.color + '20' }}
                   >
                     <DynamicIcon
                       name={category.icon}
-                      className="h-6 w-6"
+                      className="h-5 w-5 md:h-6 md:w-6"
                       style={{ color: category.color }}
                     />
                   </div>
-                  <div>
-                    <h3 className="font-semibold">{category.name}</h3>
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-sm md:text-base truncate">{category.name}</h3>
                     {budget > 0 && (
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-xs md:text-sm text-muted-foreground">
                         Budget: {formatCurrency(budget)}
                       </p>
                     )}
@@ -112,12 +128,19 @@ export default function CategoryList({ categories, onEdit }: CategoryListProps) 
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className={cn(
+                        "h-8 w-8 shrink-0",
+                        !isMobile && "opacity-0 group-hover:opacity-100 transition-opacity"
+                      )}
                     >
                       <MoreHorizontal className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handleViewExpenses(category.id)}>
+                      <ChevronRight className="mr-2 h-4 w-4" />
+                      View Expenses
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => onEdit(category)}>
                       <Pencil className="mr-2 h-4 w-4" />
                       Edit
@@ -135,7 +158,7 @@ export default function CategoryList({ categories, onEdit }: CategoryListProps) 
 
               {/* Spending Info */}
               <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
+                <div className="flex items-center justify-between text-xs md:text-sm">
                   <span className="text-muted-foreground">Spent this month</span>
                   <span className={cn(
                     "font-semibold tabular-nums",

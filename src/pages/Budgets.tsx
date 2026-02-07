@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { format } from 'date-fns';
-import { Loader2, Calendar, Info, Settings, Zap, ZapOff } from 'lucide-react';
+import { Loader2, Calendar, Info, Settings, Zap, ZapOff, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AppLayout from '@/components/layout/AppLayout';
 import MonthYearPicker from '@/components/dashboard/MonthYearPicker';
@@ -9,20 +9,29 @@ import BudgetHealthScore from '@/components/budget/BudgetHealthScore';
 import BudgetSuggestions from '@/components/budget/BudgetSuggestions';
 import FinancialSettingsCard from '@/components/budget/FinancialSettingsCard';
 import CategoryTypeEditor from '@/components/budget/CategoryTypeEditor';
+import CategoryFormDialog from '@/components/categories/CategoryFormDialog';
+import FloatingAddButton from '@/components/layout/FloatingAddButton';
+import DynamicIcon from '@/components/ui/DynamicIcon';
 import { useCategories } from '@/hooks/useCategories';
 import { useExpenses } from '@/hooks/useExpenses';
 import { useBudgetRules } from '@/hooks/useBudgetRules';
 import { useFinancialSettings } from '@/hooks/useFinancialSettings';
 import { useAuth } from '@/contexts/AuthContext';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Category } from '@/types/expense';
 
 export default function Budgets() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'));
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
 
   const { data: categories = [], isLoading: categoriesLoading } = useCategories();
   const { data: expenses = [], isLoading: expensesLoading } = useExpenses({ month: selectedMonth });
@@ -38,6 +47,16 @@ export default function Budgets() {
     }
     return acc;
   }, {} as Record<string, number>);
+
+  const handleEditCategory = (category: Category) => {
+    setEditingCategory(category);
+    setCategoryDialogOpen(true);
+  };
+
+  const handleAddCategory = () => {
+    setEditingCategory(null);
+    setCategoryDialogOpen(true);
+  };
 
   if (loading) {
     return (
@@ -79,7 +98,7 @@ export default function Budgets() {
               <p className="text-sm text-muted-foreground">
                 {smartRulesEnabled 
                   ? 'Rule-based budgeting with AI suggestions' 
-                  : 'Manual budgets without AI rules'}
+                  : 'Manual budgets with full control'}
               </p>
             </div>
           </div>
@@ -88,11 +107,9 @@ export default function Budgets() {
 
         {/* Tabs for different budget views */}
         <Tabs defaultValue="budgets" className="space-y-4">
-          <TabsList className={smartRulesEnabled ? "grid w-full grid-cols-3" : "grid w-full grid-cols-2"}>
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="budgets">Budgets</TabsTrigger>
-            {smartRulesEnabled && (
-              <TabsTrigger value="categories">Categories</TabsTrigger>
-            )}
+            <TabsTrigger value="categories">Categories</TabsTrigger>
             <TabsTrigger value="settings">Settings</TabsTrigger>
           </TabsList>
 
@@ -115,7 +132,7 @@ export default function Budgets() {
                 {smartRulesEnabled ? (
                   <>
                     <strong>Month-specific budgets</strong> override default category budgets for {monthLabel} only. 
-                    Changes here won't affect other months.
+                    AI suggestions respect your manual settings.
                   </>
                 ) : (
                   <>
@@ -134,9 +151,13 @@ export default function Budgets() {
             ) : categories.length === 0 ? (
               <Card>
                 <CardContent className="py-12 text-center">
-                  <p className="text-muted-foreground">
-                    No categories found. Create categories first to set budgets.
+                  <p className="text-muted-foreground mb-4">
+                    No categories found. Create your first category to start budgeting.
                   </p>
+                  <Button onClick={handleAddCategory} className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Add Category
+                  </Button>
                 </CardContent>
               </Card>
             ) : (
@@ -196,18 +217,119 @@ export default function Budgets() {
             )}
           </TabsContent>
 
-          {/* Categories tab - only visible when smart rules enabled */}
-          {smartRulesEnabled && (
-            <TabsContent value="categories" className="space-y-4">
+          {/* Categories tab - available in BOTH modes */}
+          <TabsContent value="categories" className="space-y-4">
+            {/* Add Category Button - Desktop */}
+            {!isMobile && (
+              <div className="flex justify-end">
+                <Button onClick={handleAddCategory} className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Add Category
+                </Button>
+              </div>
+            )}
+
+            {/* Mode-specific info */}
+            <Alert className="bg-primary/5 border-primary/20">
+              <Info className="h-4 w-4" />
+              <AlertDescription>
+                {smartRulesEnabled ? (
+                  <>
+                    <strong>Smart Mode:</strong> Manually create categories with custom icons, colors, and budgets. 
+                    AI will suggest improvements but never overwrite your settings.
+                  </>
+                ) : (
+                  <>
+                    <strong>Simple Mode:</strong> Create and manage categories manually. 
+                    Set optional budgets for each category.
+                  </>
+                )}
+              </AlertDescription>
+            </Alert>
+
+            {/* Category Type Editor - Only in Smart Mode */}
+            {smartRulesEnabled && categories.length > 0 && (
               <CategoryTypeEditor categories={categories} />
-            </TabsContent>
-          )}
+            )}
+
+            {/* Category List for Manual Management */}
+            {isLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : categories.length === 0 ? (
+              <Card>
+                <CardContent className="py-12 text-center">
+                  <p className="text-muted-foreground mb-4">
+                    No categories yet. Create your first category to organize expenses.
+                  </p>
+                  <Button onClick={handleAddCategory} className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Add Category
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {categories.map((category) => (
+                  <Card 
+                    key={category.id} 
+                    className="cursor-pointer hover:shadow-md transition-shadow"
+                    onClick={() => handleEditCategory(category)}
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0"
+                          style={{ backgroundColor: category.color + '20' }}
+                        >
+                          <DynamicIcon 
+                            name={category.icon} 
+                            className="h-5 w-5" 
+                            style={{ color: category.color }} 
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium truncate">{category.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {category.monthly_budget 
+                              ? `₹${category.monthly_budget.toLocaleString('en-IN')} budget` 
+                              : 'No budget set'}
+                          </p>
+                        </div>
+                        {smartRulesEnabled && category.category_type && (
+                          <Badge variant="outline" className="text-xs capitalize shrink-0">
+                            {category.category_type}
+                          </Badge>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </TabsContent>
 
           <TabsContent value="settings" className="space-y-4">
             <FinancialSettingsCard />
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Floating Add Button (mobile only) - shown in Categories tab */}
+      {isMobile && (
+        <FloatingAddButton onClick={handleAddCategory} />
+      )}
+
+      {/* Category Form Dialog */}
+      <CategoryFormDialog
+        open={categoryDialogOpen}
+        onOpenChange={(open) => {
+          setCategoryDialogOpen(open);
+          if (!open) setEditingCategory(null);
+        }}
+        category={editingCategory}
+      />
     </AppLayout>
   );
 }

@@ -7,6 +7,7 @@ export interface Category {
   color: string;
   icon: string;
   monthly_budget: number | null;
+  budget_alert_threshold: number;
   created_at: string;
   updated_at: string;
 }

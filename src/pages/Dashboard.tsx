@@ -9,9 +9,11 @@ import CategoryPieChart from '@/components/dashboard/CategoryPieChart';
 import CategoryBarChart from '@/components/dashboard/CategoryBarChart';
 import MonthlyTrendChart from '@/components/dashboard/MonthlyTrendChart';
 import MonthYearPicker from '@/components/dashboard/MonthYearPicker';
+import BudgetAlerts from '@/components/dashboard/BudgetAlerts';
 import ExpenseList from '@/components/expenses/ExpenseList';
 import ExpenseFormDialog from '@/components/expenses/ExpenseFormDialog';
 import { useExpenses } from '@/hooks/useExpenses';
+import { useCategories } from '@/hooks/useCategories';
 import { Expense } from '@/types/expense';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,6 +26,7 @@ export default function Dashboard() {
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
   const { data: expenses = [], isLoading } = useExpenses({ month: selectedMonth });
+  const { data: categories = [] } = useCategories();
 
   const handleEditExpense = (expense: Expense) => {
     setEditingExpense(expense);
@@ -72,6 +75,9 @@ export default function Dashboard() {
 
         {/* Stats */}
         <StatCards selectedMonth={selectedMonth} />
+
+        {/* Budget Alerts */}
+        <BudgetAlerts categories={categories} />
 
         {/* Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

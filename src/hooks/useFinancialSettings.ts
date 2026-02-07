@@ -32,12 +32,17 @@ export function useFinancialSettings() {
           savings_percentage: 20,
           min_savings_target: 0,
           show_budget_suggestions: true,
+          smart_rules_enabled: true, // Default to smart rules enabled
           created_at: '',
           updated_at: '',
         } as UserFinancialSettings;
       }
 
-      return data as UserFinancialSettings;
+      // Ensure smart_rules_enabled has a default if not set
+      return {
+        ...data,
+        smart_rules_enabled: data.smart_rules_enabled ?? true,
+      } as UserFinancialSettings;
     },
     enabled: !!user,
   });

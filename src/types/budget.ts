@@ -11,6 +11,7 @@ export interface UserFinancialSettings {
   savings_percentage: number;
   min_savings_target: number;
   show_budget_suggestions: boolean;
+  smart_rules_enabled: boolean; // Toggle for smart budget rules ON/OFF
   created_at: string;
   updated_at: string;
 }

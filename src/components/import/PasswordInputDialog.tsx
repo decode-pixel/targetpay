@@ -36,15 +36,17 @@ export default function PasswordInputDialog({
   };
 
   return (
-    <Card className={cn('border-border/50', className)}>
+    <Card className={cn('border-border/50 border-2 border-primary/20', className)}>
       <CardHeader className="text-center space-y-3">
-        <div className="mx-auto h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center">
-          <Lock className="h-7 w-7 text-primary" />
+        <div className="mx-auto h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
+          <Lock className="h-8 w-8 text-primary" />
         </div>
         <div>
           <CardTitle className="text-lg">Password Protected PDF</CardTitle>
-          <CardDescription className="mt-1">
-            This bank statement requires a password to open
+          <CardDescription className="mt-2 text-base">
+            This bank statement is password protected.
+            <br />
+            <span className="text-foreground font-medium">Enter password to continue.</span>
           </CardDescription>
         </div>
       </CardHeader>

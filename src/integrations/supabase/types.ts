@@ -50,6 +50,44 @@ export type Database = {
         }
         Relationships: []
       }
+      category_budgets: {
+        Row: {
+          budget_amount: number
+          category_id: string
+          created_at: string
+          id: string
+          month: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          budget_amount?: number
+          category_id: string
+          created_at?: string
+          id?: string
+          month: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          budget_amount?: number
+          category_id?: string
+          created_at?: string
+          id?: string
+          month?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "category_budgets_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       category_mappings: {
         Row: {
           category_id: string
@@ -339,6 +377,10 @@ export type Database = {
     }
     Functions: {
       cleanup_expired_imports: { Args: never; Returns: undefined }
+      get_effective_budget: {
+        Args: { p_category_id: string; p_month: string; p_user_id: string }
+        Returns: number
+      }
       increment_mapping_count: {
         Args: { p_keyword: string; p_user_id: string }
         Returns: undefined

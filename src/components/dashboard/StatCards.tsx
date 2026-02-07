@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { useExpenses } from '@/hooks/useExpenses';
 import { useCategories } from '@/hooks/useCategories';
+import { useAllEffectiveBudgets } from '@/hooks/useCategoryBudgets';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -20,6 +21,9 @@ interface StatCardsProps {
 export default function StatCards({ selectedMonth }: StatCardsProps) {
   const { data: expenses = [] } = useExpenses({ month: selectedMonth });
   const { data: categories = [] } = useCategories();
+  
+  // Get effective budgets for this month (combining default + month-specific)
+  const { budgets: effectiveBudgets } = useAllEffectiveBudgets(selectedMonth, categories);
 
   const stats = useMemo(() => {
     const totalExpense = expenses.reduce((sum, exp) => sum + Number(exp.amount), 0);
@@ -31,7 +35,12 @@ export default function StatCards({ selectedMonth }: StatCardsProps) {
       return acc;
     }, {} as Record<string, number>);
 
-    const totalBudget = categories.reduce((sum, cat) => sum + (Number(cat.monthly_budget) || 0), 0);
+    // Calculate total budget from effective budgets (month-specific or defaults)
+    let totalBudget = 0;
+    categories.forEach(cat => {
+      totalBudget += effectiveBudgets.get(cat.id) || 0;
+    });
+    
     const remainingBudget = totalBudget - totalExpense;
     const budgetPercentage = totalBudget > 0 ? (totalExpense / totalBudget) * 100 : 0;
 
@@ -55,7 +64,7 @@ export default function StatCards({ selectedMonth }: StatCardsProps) {
       highestCategory,
       transactionCount: expenses.length,
     };
-  }, [expenses, categories]);
+  }, [expenses, categories, effectiveBudgets]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {

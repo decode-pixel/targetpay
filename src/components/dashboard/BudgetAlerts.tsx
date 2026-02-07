@@ -2,6 +2,7 @@ import { AlertTriangle, TrendingUp, Bell } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Category } from '@/types/expense';
 import { useExpenses } from '@/hooks/useExpenses';
+import { useAllEffectiveBudgets } from '@/hooks/useCategoryBudgets';
 import { format } from 'date-fns';
 import DynamicIcon from '@/components/ui/DynamicIcon';
 import { cn } from '@/lib/utils';
@@ -9,6 +10,7 @@ import { cn } from '@/lib/utils';
 interface BudgetAlertsProps {
   categories: Category[];
   className?: string;
+  selectedMonth?: string; // Optional: defaults to current month
 }
 
 interface BudgetAlert {
@@ -19,9 +21,12 @@ interface BudgetAlert {
   isOverBudget: boolean;
 }
 
-export default function BudgetAlerts({ categories, className }: BudgetAlertsProps) {
-  const currentMonth = format(new Date(), 'yyyy-MM');
-  const { data: expenses = [] } = useExpenses({ month: currentMonth });
+export default function BudgetAlerts({ categories, className, selectedMonth }: BudgetAlertsProps) {
+  const month = selectedMonth || format(new Date(), 'yyyy-MM');
+  const { data: expenses = [] } = useExpenses({ month });
+  
+  // Get effective budgets for this month (combining default + month-specific)
+  const { budgets: effectiveBudgets } = useAllEffectiveBudgets(month, categories);
 
   // Calculate spending per category
   const categorySpending = expenses.reduce((acc, exp) => {
@@ -34,16 +39,17 @@ export default function BudgetAlerts({ categories, className }: BudgetAlertsProp
   // Find categories that have exceeded their alert threshold
   const alerts: BudgetAlert[] = categories
     .filter((cat) => {
-      if (!cat.monthly_budget || cat.monthly_budget <= 0) return false;
+      const budget = effectiveBudgets.get(cat.id) || 0;
+      if (budget <= 0) return false;
       const spent = categorySpending[cat.id] || 0;
       const threshold = cat.budget_alert_threshold ?? 80;
-      const percentage = (spent / cat.monthly_budget) * 100;
+      const percentage = (spent / budget) * 100;
       return percentage >= threshold;
     })
     .map((cat) => {
       const spent = categorySpending[cat.id] || 0;
-      const budget = cat.monthly_budget!;
-      const percentage = (spent / budget) * 100;
+      const budget = effectiveBudgets.get(cat.id) || 0;
+      const percentage = budget > 0 ? (spent / budget) * 100 : 0;
       return {
         category: cat,
         spent,

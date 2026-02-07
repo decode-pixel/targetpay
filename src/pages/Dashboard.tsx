@@ -58,8 +58,8 @@ export default function Dashboard() {
           onMonthChange={setSelectedMonth} 
         />
 
-        {/* Budget Alerts */}
-        <BudgetAlerts categories={categories} />
+        {/* Budget Alerts - now month-aware */}
+        <BudgetAlerts categories={categories} selectedMonth={selectedMonth} />
 
         {/* Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">

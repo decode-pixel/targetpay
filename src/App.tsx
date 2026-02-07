@@ -9,6 +9,7 @@ import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Expenses from "./pages/Expenses";
 import Categories from "./pages/Categories";
+import Budgets from "./pages/Budgets";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
 
@@ -27,6 +28,7 @@ const App = () => (
               <Route path="/auth" element={<Auth />} />
               <Route path="/expenses" element={<Expenses />} />
               <Route path="/categories" element={<Categories />} />
+              <Route path="/budgets" element={<Budgets />} />
               <Route path="/profile" element={<Profile />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />

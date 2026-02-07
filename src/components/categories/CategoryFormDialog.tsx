@@ -39,6 +39,7 @@ export default function CategoryFormDialog({ open, onOpenChange, category }: Cat
   const [color, setColor] = useState(CATEGORY_COLORS[0]);
   const [icon, setIcon] = useState(CATEGORY_ICONS[0]);
   const [monthlyBudget, setMonthlyBudget] = useState('');
+  const [alertThreshold, setAlertThreshold] = useState(80);
 
   const isEditing = !!category;
 
@@ -49,6 +50,7 @@ export default function CategoryFormDialog({ open, onOpenChange, category }: Cat
         setColor(category.color);
         setIcon(category.icon);
         setMonthlyBudget(category.monthly_budget?.toString() || '');
+        setAlertThreshold(category.budget_alert_threshold ?? 80);
       } else {
         resetForm();
       }
@@ -60,6 +62,7 @@ export default function CategoryFormDialog({ open, onOpenChange, category }: Cat
     setColor(CATEGORY_COLORS[0]);
     setIcon(CATEGORY_ICONS[0]);
     setMonthlyBudget('');
+    setAlertThreshold(80);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -86,6 +89,7 @@ export default function CategoryFormDialog({ open, onOpenChange, category }: Cat
       color,
       icon,
       monthly_budget: monthlyBudget ? parseFloat(monthlyBudget) : null,
+      budget_alert_threshold: alertThreshold,
     };
 
     try {
@@ -158,6 +162,29 @@ export default function CategoryFormDialog({ open, onOpenChange, category }: Cat
           />
         </div>
       </div>
+
+      {/* Budget Alert Threshold */}
+      {monthlyBudget && parseFloat(monthlyBudget) > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="threshold">Alert Threshold</Label>
+            <span className="text-sm font-medium text-primary tabular-nums">{alertThreshold}%</span>
+          </div>
+          <Input
+            id="threshold"
+            type="range"
+            min="50"
+            max="100"
+            step="5"
+            value={alertThreshold}
+            onChange={(e) => setAlertThreshold(parseInt(e.target.value))}
+            className="h-2 cursor-pointer accent-primary"
+          />
+          <p className="text-xs text-muted-foreground">
+            You'll be alerted when spending reaches {alertThreshold}% of your budget
+          </p>
+        </div>
+      )}
 
       {/* Submit */}
       <div className="flex gap-3 pt-2 pb-safe">

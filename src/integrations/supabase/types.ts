@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       categories: {
         Row: {
+          budget_alert_threshold: number
           color: string
           created_at: string
           icon: string
@@ -26,6 +27,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          budget_alert_threshold?: number
           color?: string
           created_at?: string
           icon?: string
@@ -36,6 +38,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          budget_alert_threshold?: number
           color?: string
           created_at?: string
           icon?: string

@@ -1,11 +1,12 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Receipt, Tags } from 'lucide-react';
+import { LayoutDashboard, Receipt, Tags, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
-  { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/', label: 'Home', icon: LayoutDashboard },
   { href: '/expenses', label: 'Expenses', icon: Receipt },
   { href: '/categories', label: 'Categories', icon: Tags },
+  { href: '/profile', label: 'Profile', icon: User },
 ];
 
 export default function MobileNav() {
@@ -30,7 +31,7 @@ export default function MobileNav() {
             >
               <Icon className={cn('h-5 w-5', isActive && 'text-primary')} />
               <span className={cn(
-                'text-xs font-medium',
+                'text-[10px] font-medium',
                 isActive ? 'text-primary' : 'text-muted-foreground'
               )}>
                 {item.label}

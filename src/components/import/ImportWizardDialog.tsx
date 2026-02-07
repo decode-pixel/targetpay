@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/drawer';
 import StatementUploader from './StatementUploader';
 import TransactionPreview from './TransactionPreview';
+import SuggestedCategories from '@/components/categories/SuggestedCategories';
 import { ImportWizardStep, ExtractedTransaction } from '@/types/import';
 import { useCategories } from '@/hooks/useCategories';
 import {
@@ -63,6 +64,7 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
   const [importId, setImportId] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [localTransactions, setLocalTransactions] = useState<ExtractedTransaction[]>([]);
+  const [suggestedCategories, setSuggestedCategories] = useState<{ name: string; icon: string; color: string }[]>([]);
 
   const { data: categories = [] } = useCategories();
   const { data: importRecord, refetch: refetchImport } = useStatementImport(importId);
@@ -131,7 +133,10 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
   const handleCategorize = async () => {
     if (!importId) return;
     setStep('categorize');
-    await categorizeMutation.mutateAsync(importId);
+    const result = await categorizeMutation.mutateAsync(importId);
+    if (result.suggestedCategories && result.suggestedCategories.length > 0) {
+      setSuggestedCategories(result.suggestedCategories);
+    }
   };
 
   const handleImport = async () => {
@@ -166,6 +171,7 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
     setImportId(null);
     setUploadProgress(0);
     setLocalTransactions([]);
+    setSuggestedCategories([]);
   };
 
   const handleTransactionUpdate = useCallback((id: string, updates: Partial<ExtractedTransaction>) => {
@@ -291,6 +297,14 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
                   </div>
                 </div>
               </div>
+            )}
+
+            {/* Show suggested categories in confirm step */}
+            {step === 'confirm' && suggestedCategories.length > 0 && (
+              <SuggestedCategories
+                suggestions={suggestedCategories}
+                onDismiss={() => setSuggestedCategories([])}
+              />
             )}
 
             <TransactionPreview

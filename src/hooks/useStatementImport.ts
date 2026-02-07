@@ -196,7 +196,13 @@ export function useCategorizeTransactions() {
         throw new Error(result.error || 'Failed to categorize transactions');
       }
 
-      return result;
+      return result as {
+        success: boolean;
+        totalTransactions: number;
+        categorizedCount: number;
+        avgConfidence: number;
+        suggestedCategories?: { name: string; icon: string; color: string }[];
+      };
     },
     onSuccess: (_, importId) => {
       queryClient.invalidateQueries({ queryKey: ['statement-import', importId] });

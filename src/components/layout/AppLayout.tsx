@@ -33,6 +33,7 @@ const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/expenses', label: 'Expenses', icon: Receipt },
   { href: '/categories', label: 'Categories', icon: Tags },
+  { href: '/profile', label: 'Profile', icon: User },
 ];
 
 export default function AppLayout({ children }: AppLayoutProps) {
@@ -95,14 +96,11 @@ export default function AppLayout({ children }: AppLayoutProps) {
                       {userInitials}
                     </AvatarFallback>
                   </Avatar>
-                  <span className="hidden sm:block text-sm max-w-[100px] truncate">
-                    {user?.email}
-                  </span>
                   <ChevronDown className="h-4 w-4 text-muted-foreground hidden sm:block" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem disabled>
+                <DropdownMenuItem onClick={() => navigate('/profile')}>
                   <User className="mr-2 h-4 w-4" />
                   Profile
                 </DropdownMenuItem>

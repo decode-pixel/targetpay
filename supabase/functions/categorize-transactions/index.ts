@@ -22,6 +22,12 @@ interface Transaction {
   description: string;
 }
 
+interface SuggestedCategory {
+  name: string;
+  icon: string;
+  color: string;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -70,15 +76,11 @@ serve(async (req) => {
     // Get user's categories
     const { data: categories, error: catError } = await supabase
       .from('categories')
-      .select('id, name, icon')
+      .select('id, name, icon, color')
       .eq('user_id', user.id);
 
-    if (catError || !categories || categories.length === 0) {
-      console.error('No categories found:', catError);
-      return new Response(
-        JSON.stringify({ success: false, error: 'No categories found. Please create categories first.' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    if (catError) {
+      console.error('Error fetching categories:', catError);
     }
 
     // Get user's learned category mappings
@@ -145,6 +147,8 @@ serve(async (req) => {
     }
 
     // Second pass: Use AI for unmatched transactions
+    const suggestedNewCategories: SuggestedCategory[] = [];
+    
     if (unmatchedTransactions.length > 0) {
       const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
       
@@ -157,7 +161,9 @@ serve(async (req) => {
       }
 
       // Build category list for AI
-      const categoryList = categories.map(c => `- ${c.name} (id: ${c.id})`).join('\n');
+      const categoryList = categories && categories.length > 0 
+        ? categories.map(c => `- ${c.name} (id: ${c.id})`).join('\n')
+        : 'No categories exist yet.';
 
       // Process in batches to avoid token limits
       const batchSize = 20;
@@ -168,6 +174,72 @@ serve(async (req) => {
           `${idx + 1}. "${t.description}" (id: ${t.id})`
         ).join('\n');
 
+        const systemPrompt = categories && categories.length > 0 
+          ? `You are an expense categorization assistant. Categorize each transaction into ONE of the available categories.
+
+Available categories:
+${categoryList}
+
+For each transaction, respond with a JSON object containing:
+{
+  "categorizations": [
+    {
+      "transaction_id": "the id",
+      "category_id": "id of best matching category, or null if no good match",
+      "confidence": 0.1-1.0,
+      "keyword": "short keyword from description for learning",
+      "needs_new_category": false,
+      "suggested_category": null
+    }
+  ],
+  "new_category_suggestions": [
+    {
+      "name": "Category Name",
+      "icon": "icon-name",
+      "color": "#HEX",
+      "for_transactions": ["tx_id1", "tx_id2"]
+    }
+  ]
+}
+
+If a transaction doesn't fit any existing category well, set needs_new_category: true and suggest a new category.
+Use common finance icons: utensils, car, shopping-bag, receipt, home, heart-pulse, graduation-cap, plane, gift, fuel, wifi, phone, briefcase, etc.
+Use vibrant colors like: #F97316, #3B82F6, #EC4899, #8B5CF6, #10B981, #06B6D4, #EF4444, #F59E0B
+
+Focus on Indian payment patterns: UPI, NEFT/IMPS, Swiggy, Zomato, Uber, Ola, utility bills, EMI.
+Return ONLY valid JSON.`
+          : `You are an expense categorization assistant. The user has no categories yet, so suggest appropriate categories for their transactions.
+
+For each transaction, respond with a JSON object:
+{
+  "categorizations": [
+    {
+      "transaction_id": "the id",
+      "category_id": null,
+      "confidence": 0,
+      "keyword": "short keyword",
+      "needs_new_category": true,
+      "suggested_category": {
+        "name": "Category Name",
+        "icon": "icon-name",
+        "color": "#HEX"
+      }
+    }
+  ],
+  "new_category_suggestions": [
+    {
+      "name": "Category Name",
+      "icon": "icon-name",
+      "color": "#HEX",
+      "for_transactions": ["tx_id1"]
+    }
+  ]
+}
+
+Use common finance icons: utensils, car, shopping-bag, receipt, home, heart-pulse, graduation-cap, plane, gift, fuel, wifi, phone, briefcase, etc.
+Use vibrant colors: #F97316, #3B82F6, #EC4899, #8B5CF6, #10B981, #06B6D4, #EF4444, #F59E0B.
+Return ONLY valid JSON.`;
+
         const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -177,36 +249,11 @@ serve(async (req) => {
           body: JSON.stringify({
             model: 'google/gemini-3-flash-preview',
             messages: [
-              {
-                role: 'system',
-                content: `You are an expense categorization assistant. Categorize each transaction into ONE of the available categories.
-
-Available categories:
-${categoryList}
-
-For each transaction, respond with a JSON array of objects containing:
-- transaction_id: the id of the transaction
-- category_id: the id of the best matching category
-- confidence: a number between 0.1 and 1.0 indicating confidence
-- keyword: a short keyword (max 20 chars, lowercase) from the description that indicates this category (for learning)
-
-Focus on common Indian payment patterns:
-- UPI payments often include merchant names
-- NEFT/IMPS transfers may include beneficiary names
-- ATM withdrawals are typically cash
-- Swiggy, Zomato, Uber, Ola are common apps
-- Utility payments include electricity, gas, water, internet
-- EMI payments are typically loans or bills
-
-Return ONLY valid JSON, no markdown or explanation.`
-              },
-              {
-                role: 'user',
-                content: `Categorize these transactions:\n${transactionList}`
-              }
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: `Categorize these transactions:\n${transactionList}` }
             ],
             temperature: 0.2,
-            max_tokens: 2000,
+            max_tokens: 3000,
           }),
         });
 
@@ -226,37 +273,52 @@ Return ONLY valid JSON, no markdown or explanation.`
         const aiResult = await aiResponse.json();
         const content = aiResult.choices?.[0]?.message?.content;
         
-        console.log('AI categorization response:', content?.slice(0, 300));
+        console.log('AI categorization response:', content?.slice(0, 500));
 
         try {
           // Extract JSON from markdown if present
           const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, content];
-          const categorizations = JSON.parse(jsonMatch[1].trim());
+          const result = JSON.parse(jsonMatch[1].trim());
 
           // Apply AI categorizations
-          for (const cat of categorizations) {
-            if (cat.transaction_id && cat.category_id) {
-              await supabase
-                .from('extracted_transactions')
-                .update({
-                  suggested_category_id: cat.category_id,
-                  ai_confidence: Math.min(Math.max(cat.confidence || 0.5, 0.1), 1.0),
-                })
-                .eq('id', cat.transaction_id);
-
-              // Learn from this categorization (will be reinforced if user confirms)
-              if (cat.keyword && cat.keyword.length >= 3) {
+          if (result.categorizations) {
+            for (const cat of result.categorizations) {
+              if (cat.transaction_id) {
                 await supabase
-                  .from('category_mappings')
-                  .upsert({
-                    user_id: user.id,
-                    keyword: cat.keyword.toLowerCase().slice(0, 50),
-                    category_id: cat.category_id,
-                    usage_count: 1,
-                  }, {
-                    onConflict: 'user_id,keyword',
-                    ignoreDuplicates: true,
-                  });
+                  .from('extracted_transactions')
+                  .update({
+                    suggested_category_id: cat.category_id || null,
+                    ai_confidence: Math.min(Math.max(cat.confidence || 0.5, 0.1), 1.0),
+                  })
+                  .eq('id', cat.transaction_id);
+
+                // Learn from this categorization
+                if (cat.keyword && cat.keyword.length >= 3 && cat.category_id) {
+                  await supabase
+                    .from('category_mappings')
+                    .upsert({
+                      user_id: user.id,
+                      keyword: cat.keyword.toLowerCase().slice(0, 50),
+                      category_id: cat.category_id,
+                      usage_count: 1,
+                    }, {
+                      onConflict: 'user_id,keyword',
+                      ignoreDuplicates: true,
+                    });
+                }
+              }
+            }
+          }
+
+          // Collect new category suggestions
+          if (result.new_category_suggestions) {
+            for (const suggestion of result.new_category_suggestions) {
+              if (suggestion.name && !suggestedNewCategories.find(s => s.name === suggestion.name)) {
+                suggestedNewCategories.push({
+                  name: suggestion.name,
+                  icon: suggestion.icon || 'tag',
+                  color: suggestion.color || '#3B82F6',
+                });
               }
             }
           }
@@ -283,6 +345,7 @@ Return ONLY valid JSON, no markdown or explanation.`
     const avgConfidence = totalConfidence / (categorizedCount || 1);
 
     console.log(`Categorization complete: ${categorizedCount}/${transactions.length} transactions, avg confidence: ${avgConfidence.toFixed(2)}`);
+    console.log(`Suggested ${suggestedNewCategories.length} new categories`);
 
     return new Response(
       JSON.stringify({
@@ -290,6 +353,7 @@ Return ONLY valid JSON, no markdown or explanation.`
         totalTransactions: transactions.length,
         categorizedCount,
         avgConfidence: Math.round(avgConfidence * 100),
+        suggestedCategories: suggestedNewCategories,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

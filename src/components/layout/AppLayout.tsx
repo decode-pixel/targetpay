@@ -19,7 +19,8 @@ import {
   X, 
   LogOut, 
   User,
-  ChevronDown
+  ChevronDown,
+  PiggyBank
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
@@ -33,6 +34,7 @@ const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/expenses', label: 'Expenses', icon: Receipt },
   { href: '/categories', label: 'Categories', icon: Tags },
+  { href: '/budgets', label: 'Budgets', icon: PiggyBank },
   { href: '/profile', label: 'Profile', icon: User },
 ];
 

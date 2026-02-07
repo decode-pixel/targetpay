@@ -1,11 +1,11 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Receipt, Tags, User } from 'lucide-react';
+import { LayoutDashboard, Receipt, Tags, User, Wallet } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
   { href: '/', label: 'Home', icon: LayoutDashboard },
   { href: '/expenses', label: 'Expenses', icon: Receipt },
-  { href: '/categories', label: 'Categories', icon: Tags },
+  { href: '/budgets', label: 'Budgets', icon: Wallet },
   { href: '/profile', label: 'Profile', icon: User },
 ];
 

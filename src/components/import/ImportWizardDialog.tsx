@@ -7,7 +7,8 @@ import {
   CheckCircle2, 
   XCircle, 
   ChevronRight,
-  Sparkles
+  Sparkles,
+  Calendar
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -28,6 +29,7 @@ import {
 } from '@/components/ui/drawer';
 import StatementUploader from './StatementUploader';
 import TransactionPreview from './TransactionPreview';
+import MonthGroupedPreview from './MonthGroupedPreview';
 import SuggestedCategories from '@/components/categories/SuggestedCategories';
 import { ImportWizardStep, ExtractedTransaction } from '@/types/import';
 import { useCategories } from '@/hooks/useCategories';
@@ -49,12 +51,13 @@ interface ImportWizardDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+// Updated steps to include month review
 const STEPS: { key: ImportWizardStep; label: string; icon: React.ReactNode }[] = [
   { key: 'upload', label: 'Upload', icon: <Upload className="h-4 w-4" /> },
   { key: 'processing', label: 'Extract', icon: <Loader2 className="h-4 w-4" /> },
   { key: 'preview', label: 'Preview', icon: <FileText className="h-4 w-4" /> },
   { key: 'categorize', label: 'Categorize', icon: <Sparkles className="h-4 w-4" /> },
-  { key: 'confirm', label: 'Import', icon: <CheckCircle2 className="h-4 w-4" /> },
+  { key: 'confirm', label: 'Confirm', icon: <Calendar className="h-4 w-4" /> },
 ];
 
 export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardDialogProps) {
@@ -283,7 +286,7 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
           </div>
         )}
 
-        {(step === 'preview' || step === 'confirm') && (
+        {step === 'preview' && (
           <div className="space-y-4">
             {importRecord && (
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-primary/5 rounded-lg">
@@ -299,21 +302,13 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
               </div>
             )}
 
-            {/* Show suggested categories in confirm step */}
-            {step === 'confirm' && suggestedCategories.length > 0 && (
-              <SuggestedCategories
-                suggestions={suggestedCategories}
-                onDismiss={() => setSuggestedCategories([])}
-              />
-            )}
-
             <TransactionPreview
               transactions={localTransactions}
               categories={categories}
               onTransactionUpdate={handleTransactionUpdate}
               onSelectionChange={handleSelectionChange}
               onSelectAll={handleSelectAll}
-              showCategories={step === 'confirm'}
+              showCategories={false}
             />
           </div>
         )}
@@ -332,53 +327,50 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
             <Progress value={categorizeMutation.isPending ? 60 : 100} className="w-48 mx-auto" />
           </div>
         )}
+
+        {step === 'confirm' && (
+          <div className="space-y-4">
+            {/* Show suggested categories at top */}
+            {suggestedCategories.length > 0 && (
+              <SuggestedCategories
+                suggestions={suggestedCategories}
+                onDismiss={() => setSuggestedCategories([])}
+              />
+            )}
+
+            {/* Month-grouped preview with confirmation */}
+            <MonthGroupedPreview
+              transactions={localTransactions.filter(t => t.is_selected)}
+              onConfirm={handleImport}
+              onCancel={handleCancel}
+              isImporting={importMutation.isPending}
+            />
+          </div>
+        )}
       </div>
 
-      {/* Footer actions */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t mt-4">
-        <Button variant="ghost" onClick={handleCancel} className="order-2 sm:order-1">
-          Cancel
-        </Button>
+      {/* Footer actions - only show for non-confirm steps */}
+      {step !== 'confirm' && (
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t mt-4">
+          <Button variant="ghost" onClick={handleCancel} className="order-2 sm:order-1">
+            Cancel
+          </Button>
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 order-1 sm:order-2">
-          {step === 'preview' && (
-            <Button 
-              onClick={handleCategorize} 
-              disabled={categorizeMutation.isPending}
-              className="w-full sm:w-auto"
-            >
-              <Sparkles className="h-4 w-4 mr-2" />
-              Categorize with AI
-              <ChevronRight className="h-4 w-4 ml-2" />
-            </Button>
-          )}
-
-          {step === 'confirm' && (
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-              <div className="text-center sm:text-right">
-                <p className="text-xs text-muted-foreground">
-                  Importing {selectedCount} transactions
-                </p>
-                <p className="font-semibold text-destructive text-sm">
-                  Total: {formatCurrency(totalAmount)}
-                </p>
-              </div>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 order-1 sm:order-2">
+            {step === 'preview' && (
               <Button 
-                onClick={handleImport} 
-                disabled={importMutation.isPending || selectedCount === 0}
-                className="gap-2 w-full sm:w-auto"
+                onClick={handleCategorize} 
+                disabled={categorizeMutation.isPending}
+                className="w-full sm:w-auto"
               >
-                {importMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="h-4 w-4" />
-                )}
-                Import Expenses
+                <Sparkles className="h-4 w-4 mr-2" />
+                Categorize with AI
+                <ChevronRight className="h-4 w-4 ml-2" />
               </Button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 

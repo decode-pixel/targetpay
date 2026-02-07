@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "https://esm.sh/zod@3.23.8";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -56,15 +57,31 @@ serve(async (req) => {
       );
     }
 
-    const { importId } = await req.json();
-    
-    if (!importId) {
+    // Input validation schema
+    const requestSchema = z.object({
+      importId: z.string().uuid({ message: 'Invalid import ID format' }),
+    });
+
+    let body;
+    try {
+      body = await req.json();
+    } catch {
       return new Response(
-        JSON.stringify({ success: false, error: 'Import ID required' }),
+        JSON.stringify({ success: false, error: 'Invalid JSON body' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
+    const validation = requestSchema.safeParse(body);
+    if (!validation.success) {
+      console.error('Validation error:', validation.error.errors);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Invalid request: ' + validation.error.errors[0]?.message }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { importId } = validation.data;
     console.log(`Categorizing transactions for import ${importId}`);
 
     // Update status

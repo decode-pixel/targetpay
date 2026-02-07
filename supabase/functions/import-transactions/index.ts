@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "https://esm.sh/zod@3.23.8";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -34,15 +35,37 @@ serve(async (req) => {
       );
     }
 
-    const { importId, transactions: transactionUpdates } = await req.json();
-    
-    if (!importId) {
+    // Input validation schema with array size limits
+    const transactionUpdateSchema = z.object({
+      id: z.string().uuid({ message: 'Invalid transaction ID format' }),
+      category_id: z.string().uuid({ message: 'Invalid category ID format' }).optional(),
+    });
+
+    const requestSchema = z.object({
+      importId: z.string().uuid({ message: 'Invalid import ID format' }),
+      transactions: z.array(transactionUpdateSchema).max(1000, { message: 'Maximum 1000 transactions per import' }).optional(),
+    });
+
+    let body;
+    try {
+      body = await req.json();
+    } catch {
       return new Response(
-        JSON.stringify({ success: false, error: 'Import ID required' }),
+        JSON.stringify({ success: false, error: 'Invalid JSON body' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
+    const validation = requestSchema.safeParse(body);
+    if (!validation.success) {
+      console.error('Validation error:', validation.error.errors);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Invalid request: ' + validation.error.errors[0]?.message }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { importId, transactions: transactionUpdates } = validation.data;
     console.log(`Importing transactions for import ${importId}`);
 
     // Get selected transactions with updated data
@@ -61,13 +84,9 @@ serve(async (req) => {
       );
     }
 
-    // Apply any client-side updates (category changes, etc.)
-    interface TransactionUpdate {
-      id: string;
-      category_id?: string;
-    }
-    const updateMap = new Map<string, TransactionUpdate>(
-      transactionUpdates?.map((t: TransactionUpdate) => [t.id, t]) || []
+    // Apply any client-side updates (category changes, etc.) - types inferred from zod schema
+    const updateMap = new Map(
+      transactionUpdates?.map((t) => [t.id, t]) || []
     );
 
     // Convert extracted transactions to expenses

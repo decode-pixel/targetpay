@@ -384,6 +384,7 @@ export type Database = {
           needs_percentage: number | null
           savings_percentage: number | null
           show_budget_suggestions: boolean | null
+          smart_rules_enabled: boolean | null
           updated_at: string
           user_id: string
           wants_percentage: number | null
@@ -397,6 +398,7 @@ export type Database = {
           needs_percentage?: number | null
           savings_percentage?: number | null
           show_budget_suggestions?: boolean | null
+          smart_rules_enabled?: boolean | null
           updated_at?: string
           user_id: string
           wants_percentage?: number | null
@@ -410,6 +412,7 @@ export type Database = {
           needs_percentage?: number | null
           savings_percentage?: number | null
           show_budget_suggestions?: boolean | null
+          smart_rules_enabled?: boolean | null
           updated_at?: string
           user_id?: string
           wants_percentage?: number | null

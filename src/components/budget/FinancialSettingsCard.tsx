@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Save, Settings, IndianRupee, Percent, Shield } from 'lucide-react';
+import { Save, Settings, IndianRupee, Percent, Shield, Zap, ZapOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   Select,
   SelectContent,
@@ -31,6 +32,7 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
   const [wantsPercent, setWantsPercent] = useState(30);
   const [savingsPercent, setSavingsPercent] = useState(20);
   const [showSuggestions, setShowSuggestions] = useState(true);
+  const [smartRulesEnabled, setSmartRulesEnabled] = useState(true);
   const [hasChanges, setHasChanges] = useState(false);
 
   useEffect(() => {
@@ -41,11 +43,17 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
       setWantsPercent(settings.wants_percentage);
       setSavingsPercent(settings.savings_percentage);
       setShowSuggestions(settings.show_budget_suggestions);
+      setSmartRulesEnabled(settings.smart_rules_enabled ?? true);
     }
   }, [settings]);
 
   const handleIncomeChange = (value: string) => {
     setIncome(value);
+    setHasChanges(true);
+  };
+
+  const handleSmartRulesToggle = (enabled: boolean) => {
+    setSmartRulesEnabled(enabled);
     setHasChanges(true);
   };
 
@@ -82,6 +90,7 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
       wants_percentage: wantsPercent,
       savings_percentage: savingsPercent,
       show_budget_suggestions: showSuggestions,
+      smart_rules_enabled: smartRulesEnabled,
     });
     setHasChanges(false);
   };
@@ -118,7 +127,78 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Monthly Income */}
+        {/* Smart Budget Rules Toggle - MAIN TOGGLE */}
+        <div className="p-4 rounded-xl border-2 border-primary/20 bg-primary/5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {smartRulesEnabled ? (
+                <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
+                  <Zap className="h-5 w-5 text-primary" />
+                </div>
+              ) : (
+                <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center">
+                  <ZapOff className="h-5 w-5 text-muted-foreground" />
+                </div>
+              )}
+              <div>
+                <Label htmlFor="smart-rules" className="text-base font-semibold cursor-pointer">
+                  Smart Budget Rules
+                </Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {smartRulesEnabled 
+                    ? 'AI-powered suggestions and rules enabled' 
+                    : 'Simple mode - manual budgets only'}
+                </p>
+              </div>
+            </div>
+            <Switch
+              id="smart-rules"
+              checked={smartRulesEnabled}
+              onCheckedChange={handleSmartRulesToggle}
+            />
+          </div>
+          
+          {/* Mode explanation */}
+          <div className="mt-3 pt-3 border-t border-primary/20">
+            {smartRulesEnabled ? (
+              <ul className="text-xs text-muted-foreground space-y-1">
+                <li className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  50/30/20 rule-based budget guidance
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  Smart alerts at 70%, 90%, 100% usage
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  Budget health score & suggestions
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  Category type classification (Needs/Wants/Savings)
+                </li>
+              </ul>
+            ) : (
+              <ul className="text-xs text-muted-foreground space-y-1">
+                <li className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+                  Simple category-wise budgets
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+                  Manual budget control only
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+                  No AI recommendations
+                </li>
+              </ul>
+            )}
+          </div>
+        </div>
+
+        {/* Monthly Income - Show always */}
         <div className="space-y-2">
           <Label htmlFor="income" className="flex items-center gap-2">
             <IndianRupee className="h-3.5 w-3.5" />
@@ -133,123 +213,130 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
             className="h-11"
           />
           <p className="text-xs text-muted-foreground">
-            Used for percentage-based budget recommendations
+            {smartRulesEnabled 
+              ? 'Used for percentage-based budget recommendations'
+              : 'Track your income for reference'}
           </p>
         </div>
 
-        {/* Budget Mode */}
-        <div className="space-y-2">
-          <Label className="flex items-center gap-2">
-            <Shield className="h-3.5 w-3.5" />
-            Budget Mode
-          </Label>
-          <Select 
-            value={budgetMode} 
-            onValueChange={(v) => { setBudgetMode(v as BudgetMode); setHasChanges(true); }}
-          >
-            <SelectTrigger className="h-11">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="flexible">
-                <div className="flex flex-col items-start">
-                  <span>Flexible</span>
-                  <span className="text-xs text-muted-foreground">Suggestions only, no restrictions</span>
-                </div>
-              </SelectItem>
-              <SelectItem value="guided">
-                <div className="flex flex-col items-start">
-                  <span>Guided</span>
-                  <span className="text-xs text-muted-foreground">Warnings when rules are violated</span>
-                </div>
-              </SelectItem>
-              <SelectItem value="strict">
-                <div className="flex flex-col items-start">
-                  <span>Strict</span>
-                  <span className="text-xs text-muted-foreground">Requires override for violations</span>
-                </div>
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Budget Allocation */}
-        {incomeValue > 0 && (
-          <div className="space-y-4 pt-2">
-            <Label className="flex items-center gap-2">
-              <Percent className="h-3.5 w-3.5" />
-              Budget Allocation (50/30/20 Rule)
-            </Label>
-            
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Needs</span>
-                  <span className="font-medium">
-                    {needsPercent}% ({formatCurrency(incomeValue * needsPercent / 100)})
-                  </span>
-                </div>
-                <Slider
-                  value={[needsPercent]}
-                  onValueChange={([v]) => handlePercentageChange('needs', v)}
-                  max={80}
-                  min={20}
-                  step={5}
-                  className="py-2"
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Wants</span>
-                  <span className="font-medium">
-                    {wantsPercent}% ({formatCurrency(incomeValue * wantsPercent / 100)})
-                  </span>
-                </div>
-                <Slider
-                  value={[wantsPercent]}
-                  onValueChange={([v]) => handlePercentageChange('wants', v)}
-                  max={60}
-                  min={10}
-                  step={5}
-                  className="py-2"
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Savings</span>
-                  <span className="font-medium">
-                    {savingsPercent}% ({formatCurrency(incomeValue * savingsPercent / 100)})
-                  </span>
-                </div>
-                <Slider
-                  value={[savingsPercent]}
-                  onValueChange={([v]) => handlePercentageChange('savings', v)}
-                  max={50}
-                  min={5}
-                  step={5}
-                  className="py-2"
-                />
-              </div>
+        {/* Advanced settings - only show when smart rules enabled */}
+        {smartRulesEnabled && (
+          <>
+            {/* Budget Mode */}
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Shield className="h-3.5 w-3.5" />
+                Rule Enforcement
+              </Label>
+              <Select 
+                value={budgetMode} 
+                onValueChange={(v) => { setBudgetMode(v as BudgetMode); setHasChanges(true); }}
+              >
+                <SelectTrigger className="h-11">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="flexible">
+                    <div className="flex flex-col items-start">
+                      <span>Flexible</span>
+                      <span className="text-xs text-muted-foreground">Suggestions only, no restrictions</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="guided">
+                    <div className="flex flex-col items-start">
+                      <span>Guided</span>
+                      <span className="text-xs text-muted-foreground">Warnings when rules are violated</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="strict">
+                    <div className="flex flex-col items-start">
+                      <span>Strict</span>
+                      <span className="text-xs text-muted-foreground">Requires override for violations</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-          </div>
-        )}
 
-        {/* Show Suggestions Toggle */}
-        <div className="flex items-center justify-between pt-2">
-          <div className="space-y-0.5">
-            <Label htmlFor="suggestions">Smart Suggestions</Label>
-            <p className="text-xs text-muted-foreground">
-              Show budget tips and alerts
-            </p>
-          </div>
-          <Switch
-            id="suggestions"
-            checked={showSuggestions}
-            onCheckedChange={(v) => { setShowSuggestions(v); setHasChanges(true); }}
-          />
-        </div>
+            {/* Budget Allocation */}
+            {incomeValue > 0 && (
+              <div className="space-y-4 pt-2">
+                <Label className="flex items-center gap-2">
+                  <Percent className="h-3.5 w-3.5" />
+                  Budget Allocation (50/30/20 Rule)
+                </Label>
+                
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Needs</span>
+                      <span className="font-medium">
+                        {needsPercent}% ({formatCurrency(incomeValue * needsPercent / 100)})
+                      </span>
+                    </div>
+                    <Slider
+                      value={[needsPercent]}
+                      onValueChange={([v]) => handlePercentageChange('needs', v)}
+                      max={80}
+                      min={20}
+                      step={5}
+                      className="py-2"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Wants</span>
+                      <span className="font-medium">
+                        {wantsPercent}% ({formatCurrency(incomeValue * wantsPercent / 100)})
+                      </span>
+                    </div>
+                    <Slider
+                      value={[wantsPercent]}
+                      onValueChange={([v]) => handlePercentageChange('wants', v)}
+                      max={60}
+                      min={10}
+                      step={5}
+                      className="py-2"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Savings</span>
+                      <span className="font-medium">
+                        {savingsPercent}% ({formatCurrency(incomeValue * savingsPercent / 100)})
+                      </span>
+                    </div>
+                    <Slider
+                      value={[savingsPercent]}
+                      onValueChange={([v]) => handlePercentageChange('savings', v)}
+                      max={50}
+                      min={5}
+                      step={5}
+                      className="py-2"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Show Suggestions Toggle */}
+            <div className="flex items-center justify-between pt-2">
+              <div className="space-y-0.5">
+                <Label htmlFor="suggestions">Smart Suggestions</Label>
+                <p className="text-xs text-muted-foreground">
+                  Show budget tips and alerts
+                </p>
+              </div>
+              <Switch
+                id="suggestions"
+                checked={showSuggestions}
+                onCheckedChange={(v) => { setShowSuggestions(v); setHasChanges(true); }}
+              />
+            </div>
+          </>
+        )}
 
         {/* Save Button */}
         <Button

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { format } from 'date-fns';
-import { Loader2, Calendar, Info, Settings } from 'lucide-react';
+import { Loader2, Calendar, Info, Settings, Zap, ZapOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AppLayout from '@/components/layout/AppLayout';
 import MonthYearPicker from '@/components/dashboard/MonthYearPicker';
@@ -12,10 +12,12 @@ import CategoryTypeEditor from '@/components/budget/CategoryTypeEditor';
 import { useCategories } from '@/hooks/useCategories';
 import { useExpenses } from '@/hooks/useExpenses';
 import { useBudgetRules } from '@/hooks/useBudgetRules';
+import { useFinancialSettings } from '@/hooks/useFinancialSettings';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
 
 export default function Budgets() {
   const { user, loading } = useAuth();
@@ -24,7 +26,10 @@ export default function Budgets() {
 
   const { data: categories = [], isLoading: categoriesLoading } = useCategories();
   const { data: expenses = [], isLoading: expensesLoading } = useExpenses({ month: selectedMonth });
+  const { data: financialSettings } = useFinancialSettings();
   const { healthMetrics, suggestions, categoryDetails } = useBudgetRules({ month: selectedMonth });
+
+  const smartRulesEnabled = financialSettings?.smart_rules_enabled ?? true;
 
   // Calculate spending per category for the selected month
   const categorySpending = expenses.reduce((acc, exp) => {
@@ -55,26 +60,45 @@ export default function Budgets() {
       <div className="space-y-4 md:space-y-6 animate-fade-in">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold">Budget Management</h1>
-            <p className="text-sm text-muted-foreground">
-              Smart budgeting with rule-based guidance
-            </p>
+          <div className="flex items-center gap-3">
+            <div>
+              <h1 className="text-xl md:text-2xl font-bold flex items-center gap-2">
+                Budget Management
+                {smartRulesEnabled ? (
+                  <Badge variant="secondary" className="bg-primary/10 text-primary font-normal">
+                    <Zap className="h-3 w-3 mr-1" />
+                    Smart
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary" className="bg-muted font-normal">
+                    <ZapOff className="h-3 w-3 mr-1" />
+                    Simple
+                  </Badge>
+                )}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                {smartRulesEnabled 
+                  ? 'Rule-based budgeting with AI suggestions' 
+                  : 'Manual budgets without AI rules'}
+              </p>
+            </div>
           </div>
           <MonthYearPicker value={selectedMonth} onChange={setSelectedMonth} />
         </div>
 
         {/* Tabs for different budget views */}
         <Tabs defaultValue="budgets" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className={smartRulesEnabled ? "grid w-full grid-cols-3" : "grid w-full grid-cols-2"}>
             <TabsTrigger value="budgets">Budgets</TabsTrigger>
-            <TabsTrigger value="categories">Categories</TabsTrigger>
+            {smartRulesEnabled && (
+              <TabsTrigger value="categories">Categories</TabsTrigger>
+            )}
             <TabsTrigger value="settings">Settings</TabsTrigger>
           </TabsList>
 
           <TabsContent value="budgets" className="space-y-4">
-            {/* Health Score & Suggestions Row */}
-            {!isLoading && categories.length > 0 && (
+            {/* Health Score & Suggestions Row - Only show when smart rules enabled */}
+            {smartRulesEnabled && !isLoading && categories.length > 0 && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <BudgetHealthScore metrics={healthMetrics} />
                 <BudgetSuggestions 
@@ -88,8 +112,17 @@ export default function Budgets() {
             <Alert className="bg-primary/5 border-primary/20">
               <Info className="h-4 w-4" />
               <AlertDescription>
-                <strong>Month-specific budgets</strong> override default category budgets for {monthLabel} only. 
-                Changes here won't affect other months.
+                {smartRulesEnabled ? (
+                  <>
+                    <strong>Month-specific budgets</strong> override default category budgets for {monthLabel} only. 
+                    Changes here won't affect other months.
+                  </>
+                ) : (
+                  <>
+                    <strong>Simple Mode:</strong> Set manual budgets for each category. 
+                    Enable Smart Rules in Settings for AI-powered suggestions.
+                  </>
+                )}
               </AlertDescription>
             </Alert>
 
@@ -163,9 +196,12 @@ export default function Budgets() {
             )}
           </TabsContent>
 
-          <TabsContent value="categories" className="space-y-4">
-            <CategoryTypeEditor categories={categories} />
-          </TabsContent>
+          {/* Categories tab - only visible when smart rules enabled */}
+          {smartRulesEnabled && (
+            <TabsContent value="categories" className="space-y-4">
+              <CategoryTypeEditor categories={categories} />
+            </TabsContent>
+          )}
 
           <TabsContent value="settings" className="space-y-4">
             <FinancialSettingsCard />

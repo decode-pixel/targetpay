@@ -14,7 +14,8 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer';
-import { Category, CATEGORY_COLORS, CATEGORY_ICONS } from '@/types/expense';
+import { Category, CATEGORY_COLORS, CATEGORY_ICONS, CategoryType } from '@/types/expense';
+import { inferCategoryType } from '@/types/budget';
 import { useCreateCategory, useUpdateCategory, useCategories } from '@/hooks/useCategories';
 import DynamicIcon from '@/components/ui/DynamicIcon';
 import IconPicker from './IconPicker';
@@ -90,6 +91,7 @@ export default function CategoryFormDialog({ open, onOpenChange, category }: Cat
       icon,
       monthly_budget: monthlyBudget ? parseFloat(monthlyBudget) : null,
       budget_alert_threshold: alertThreshold,
+      category_type: inferCategoryType(trimmedName) as CategoryType,
     };
 
     try {

@@ -136,7 +136,7 @@ export function useParseStatement() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (importId: string) => {
+    mutationFn: async ({ importId, password }: { importId: string; password?: string }) => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
 
@@ -148,11 +148,20 @@ export function useParseStatement() {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ importId }),
+          body: JSON.stringify({ importId, ...(password && { password }) }),
         }
       );
 
       const result = await response.json();
+      
+      // Handle password required response (not an error, just needs password)
+      if (result.passwordRequired) {
+        return {
+          ...result,
+          success: false,
+          passwordRequired: true,
+        };
+      }
       
       if (!response.ok || !result.success) {
         throw new Error(result.error || 'Failed to parse statement');
@@ -160,9 +169,12 @@ export function useParseStatement() {
 
       return result;
     },
-    onSuccess: (_, importId) => {
-      queryClient.invalidateQueries({ queryKey: ['statement-import', importId] });
-      queryClient.invalidateQueries({ queryKey: ['extracted-transactions', importId] });
+    onSuccess: (result, variables) => {
+      // Don't invalidate if password is required - we're waiting for user input
+      if (!result.passwordRequired) {
+        queryClient.invalidateQueries({ queryKey: ['statement-import', variables.importId] });
+        queryClient.invalidateQueries({ queryKey: ['extracted-transactions', variables.importId] });
+      }
     },
     onError: (error) => {
       toast.error(error.message);

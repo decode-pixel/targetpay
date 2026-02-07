@@ -9,7 +9,7 @@ export interface StatementImport {
   statement_period_end: string | null;
   total_transactions: number;
   imported_transactions: number;
-  status: 'pending' | 'processing' | 'extracted' | 'categorizing' | 'ready' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'password_required' | 'extracted' | 'categorizing' | 'ready' | 'completed' | 'failed';
   error_message: string | null;
   expires_at: string;
   created_at: string;
@@ -41,4 +41,4 @@ export interface ExtractedTransaction {
   };
 }
 
-export type ImportWizardStep = 'upload' | 'processing' | 'preview' | 'categorize' | 'confirm';
+export type ImportWizardStep = 'upload' | 'processing' | 'password_required' | 'preview' | 'categorize' | 'confirm';

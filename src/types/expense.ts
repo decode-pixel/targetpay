@@ -1,5 +1,7 @@
 export type PaymentMethod = 'cash' | 'upi' | 'card' | 'bank' | 'wallet';
 
+export type CategoryType = 'needs' | 'wants' | 'savings';
+
 export interface Category {
   id: string;
   user_id: string;
@@ -8,6 +10,7 @@ export interface Category {
   icon: string;
   monthly_budget: number | null;
   budget_alert_threshold: number;
+  category_type: CategoryType;
   created_at: string;
   updated_at: string;
 }

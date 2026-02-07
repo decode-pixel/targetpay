@@ -17,6 +17,7 @@ export type Database = {
       categories: {
         Row: {
           budget_alert_threshold: number
+          category_type: string | null
           color: string
           created_at: string
           icon: string
@@ -28,6 +29,7 @@ export type Database = {
         }
         Insert: {
           budget_alert_threshold?: number
+          category_type?: string | null
           color?: string
           created_at?: string
           icon?: string
@@ -39,6 +41,7 @@ export type Database = {
         }
         Update: {
           budget_alert_threshold?: number
+          category_type?: string | null
           color?: string
           created_at?: string
           icon?: string
@@ -368,6 +371,48 @@ export type Database = {
           total_transactions?: number | null
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      user_financial_settings: {
+        Row: {
+          budget_mode: string | null
+          created_at: string
+          id: string
+          min_savings_target: number | null
+          monthly_income: number | null
+          needs_percentage: number | null
+          savings_percentage: number | null
+          show_budget_suggestions: boolean | null
+          updated_at: string
+          user_id: string
+          wants_percentage: number | null
+        }
+        Insert: {
+          budget_mode?: string | null
+          created_at?: string
+          id?: string
+          min_savings_target?: number | null
+          monthly_income?: number | null
+          needs_percentage?: number | null
+          savings_percentage?: number | null
+          show_budget_suggestions?: boolean | null
+          updated_at?: string
+          user_id: string
+          wants_percentage?: number | null
+        }
+        Update: {
+          budget_mode?: string | null
+          created_at?: string
+          id?: string
+          min_savings_target?: number | null
+          monthly_income?: number | null
+          needs_percentage?: number | null
+          savings_percentage?: number | null
+          show_budget_suggestions?: boolean | null
+          updated_at?: string
+          user_id?: string
+          wants_percentage?: number | null
         }
         Relationships: []
       }

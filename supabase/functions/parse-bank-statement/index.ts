@@ -41,6 +41,21 @@ interface Transaction {
   rawText: string;
 }
 
+// PDF password protection detection patterns
+const PASSWORD_PROTECTED_MARKERS = [
+  '/Encrypt',
+  '%PDF-1.',
+];
+
+function detectPasswordProtection(pdfBuffer: ArrayBuffer): boolean {
+  // Check first 2KB of PDF for encryption markers
+  const headerBytes = new Uint8Array(pdfBuffer.slice(0, 2048));
+  const headerStr = new TextDecoder().decode(headerBytes);
+  
+  // Look for /Encrypt dictionary which indicates encryption
+  return headerStr.includes('/Encrypt');
+}
+
 function detectBank(text: string): string | null {
   for (const [bankName, pattern] of Object.entries(BANK_PATTERNS)) {
     if (pattern.identifier.test(text)) {
@@ -213,9 +228,10 @@ serve(async (req) => {
       );
     }
 
-    // Input validation schema
+    // Input validation schema - now includes optional password
     const requestSchema = z.object({
       importId: z.string().uuid({ message: 'Invalid import ID format' }),
+      password: z.string().max(100).optional(), // Optional password for protected PDFs
     });
 
     let body;
@@ -237,8 +253,8 @@ serve(async (req) => {
       );
     }
 
-    const { importId } = validation.data;
-    console.log(`Processing import ${importId} for user ${user.id}`);
+    const { importId, password } = validation.data;
+    console.log(`Processing import ${importId} for user ${user.id}${password ? ' (with password)' : ''}`);
 
     // Get import record
     const { data: importRecord, error: importError } = await supabase
@@ -284,6 +300,32 @@ serve(async (req) => {
     const fileBuffer = await fileData.arrayBuffer();
     const fileHash = await hashFile(fileBuffer);
 
+    // Check if PDF is password protected
+    const isPasswordProtected = detectPasswordProtection(fileBuffer);
+    
+    if (isPasswordProtected && !password) {
+      // PDF is protected but no password provided
+      console.log('Password-protected PDF detected, requesting password');
+      await supabase
+        .from('statement_imports')
+        .update({ 
+          status: 'password_required',
+          error_message: 'This bank statement is password protected. Please provide the password to continue.',
+          file_hash: fileHash 
+        })
+        .eq('id', importId);
+      
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: 'Password required',
+          passwordRequired: true,
+          message: 'This bank statement is password protected. Please enter the password to continue.'
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const { data: existingImport } = await supabase
       .from('statement_imports')
       .select('id, file_name, created_at')
@@ -316,9 +358,15 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     
     // Convert PDF to base64 for the AI
+    // Note: If password was provided, we include it in the prompt for the AI to use
     const base64Data = btoa(
       new Uint8Array(fileBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
     );
+    
+    // Password hint for AI (if provided)
+    const passwordContext = password 
+      ? `\nThis PDF is password protected. The password is: ${password}\nPlease use this password to decrypt and read the document.`
+      : '';
 
     // Use Gemini for document understanding with OCR
     const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {

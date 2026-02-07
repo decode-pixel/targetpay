@@ -35,6 +35,7 @@ export default function SuggestedCategories({ suggestions, onDismiss }: Suggeste
         color: suggestion.color,
         monthly_budget: null,
         budget_alert_threshold: 80,
+        category_type: 'wants',
       });
       setCreatedNames(prev => new Set([...prev, suggestion.name]));
     } catch {

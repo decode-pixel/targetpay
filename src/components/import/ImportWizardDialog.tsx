@@ -8,7 +8,8 @@ import {
   XCircle, 
   ChevronRight,
   Sparkles,
-  Calendar
+  Calendar,
+  Lock
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -30,6 +31,7 @@ import {
 import StatementUploader from './StatementUploader';
 import TransactionPreview from './TransactionPreview';
 import MonthGroupedPreview from './MonthGroupedPreview';
+import PasswordInputDialog from './PasswordInputDialog';
 import SuggestedCategories from '@/components/categories/SuggestedCategories';
 import { ImportWizardStep, ExtractedTransaction } from '@/types/import';
 import { useCategories } from '@/hooks/useCategories';
@@ -68,6 +70,7 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
   const [uploadProgress, setUploadProgress] = useState(0);
   const [localTransactions, setLocalTransactions] = useState<ExtractedTransaction[]>([]);
   const [suggestedCategories, setSuggestedCategories] = useState<{ name: string; icon: string; color: string }[]>([]);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
 
   const { data: categories = [] } = useCategories();
   const { data: importRecord, refetch: refetchImport } = useStatementImport(importId);
@@ -95,6 +98,9 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
       case 'pending':
       case 'processing':
         setStep('processing');
+        break;
+      case 'password_required':
+        setStep('password_required');
         break;
       case 'extracted':
         setStep('preview');
@@ -125,11 +131,37 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
       setUploadProgress(100);
       
       setStep('processing');
-      await parseMutation.mutateAsync(result.id);
+      const parseResult = await parseMutation.mutateAsync({ importId: result.id });
+      
+      // Check if password is required
+      if (parseResult.passwordRequired) {
+        setStep('password_required');
+      }
     } catch (error) {
       // Error handled by mutation
     } finally {
       clearInterval(progressInterval);
+    }
+  };
+  
+  const handlePasswordSubmit = async (password: string) => {
+    if (!importId) return;
+    setPasswordError(null);
+    
+    try {
+      const result = await parseMutation.mutateAsync({ importId, password });
+      
+      if (result.passwordRequired) {
+        // Password was incorrect
+        setPasswordError('Incorrect password. Please try again.');
+        return;
+      }
+      
+      // Password worked, continue to processing
+      setStep('processing');
+      await refetchImport();
+    } catch (error) {
+      setPasswordError(error instanceof Error ? error.message : 'Failed to process statement');
     }
   };
 
@@ -175,6 +207,7 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
     setUploadProgress(0);
     setLocalTransactions([]);
     setSuggestedCategories([]);
+    setPasswordError(null);
   };
 
   const handleTransactionUpdate = useCallback((id: string, updates: Partial<ExtractedTransaction>) => {
@@ -284,6 +317,16 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
               </Alert>
             )}
           </div>
+        )}
+
+        {step === 'password_required' && importRecord && (
+          <PasswordInputDialog
+            fileName={importRecord.file_name}
+            onSubmit={handlePasswordSubmit}
+            onCancel={handleCancel}
+            isProcessing={parseMutation.isPending}
+            error={passwordError}
+          />
         )}
 
         {step === 'preview' && (

@@ -70,11 +70,36 @@ export const PAYMENT_METHODS: { value: PaymentMethod; label: string; icon: strin
   { value: 'wallet', label: 'Wallet', icon: 'wallet' },
 ];
 
+// Expanded realistic finance icons
 export const CATEGORY_ICONS = [
-  'utensils', 'car', 'shopping-bag', 'gamepad-2', 'receipt', 
-  'heart-pulse', 'graduation-cap', 'more-horizontal', 'home',
-  'plane', 'gift', 'briefcase', 'music', 'camera', 'dumbbell',
-  'coffee', 'book', 'shirt', 'baby', 'dog', 'flower-2', 'fuel'
+  // Food & Dining
+  'utensils', 'coffee', 'pizza', 'sandwich', 'apple', 'beer', 'wine', 'cookie',
+  // Transportation
+  'car', 'bus', 'train', 'plane', 'bike', 'fuel', 'car-taxi-front',
+  // Shopping
+  'shopping-bag', 'shopping-cart', 'shirt', 'gem', 'gift', 'package',
+  // Entertainment
+  'gamepad-2', 'music', 'tv', 'film', 'ticket', 'popcorn',
+  // Bills & Utilities
+  'receipt', 'file-text', 'zap', 'droplet', 'wifi', 'phone', 'lightbulb',
+  // Healthcare
+  'heart-pulse', 'pill', 'stethoscope', 'activity', 'thermometer',
+  // Education
+  'graduation-cap', 'book', 'book-open', 'library', 'pen-tool',
+  // Home
+  'home', 'sofa', 'lamp', 'key', 'wrench', 'paint-bucket',
+  // Finance
+  'wallet', 'credit-card', 'banknote', 'piggy-bank', 'trending-up', 'landmark',
+  // Personal
+  'user', 'baby', 'dog', 'cat', 'flower-2', 'scissors', 'dumbbell', 'spa',
+  // Work
+  'briefcase', 'laptop', 'monitor', 'printer', 'headphones',
+  // Travel
+  'map', 'compass', 'tent', 'umbrella', 'camera', 'luggage',
+  // Subscriptions
+  'repeat', 'cloud', 'play-circle', 'music-2', 'newspaper',
+  // Other
+  'more-horizontal', 'star', 'tag', 'flag', 'bookmark'
 ];
 
 export const CATEGORY_COLORS = [

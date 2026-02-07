@@ -4,11 +4,10 @@ import { Plus, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import AppLayout from '@/components/layout/AppLayout';
-import StatCards from '@/components/dashboard/StatCards';
+import DashboardHeader from '@/components/dashboard/DashboardHeader';
 import CategoryPieChart from '@/components/dashboard/CategoryPieChart';
 import CategoryBarChart from '@/components/dashboard/CategoryBarChart';
 import MonthlyTrendChart from '@/components/dashboard/MonthlyTrendChart';
-import MonthYearPicker from '@/components/dashboard/MonthYearPicker';
 import BudgetAlerts from '@/components/dashboard/BudgetAlerts';
 import ExpenseList from '@/components/expenses/ExpenseList';
 import ExpenseFormDialog from '@/components/expenses/ExpenseFormDialog';
@@ -52,35 +51,18 @@ export default function Dashboard() {
 
   return (
     <AppLayout>
-      <div className="space-y-6 animate-fade-in">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold">Dashboard</h1>
-            <p className="text-muted-foreground">
-              Track your monthly expenses
-            </p>
-          </div>
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-            <MonthYearPicker 
-              value={selectedMonth} 
-              onChange={setSelectedMonth} 
-            />
-            <Button onClick={() => setExpenseDialogOpen(true)} className="gap-2">
-              <Plus className="h-4 w-4" />
-              Add Expense
-            </Button>
-          </div>
-        </div>
-
-        {/* Stats */}
-        <StatCards selectedMonth={selectedMonth} />
+      <div className="space-y-4 md:space-y-6 animate-fade-in">
+        {/* Sticky Dashboard Header */}
+        <DashboardHeader 
+          selectedMonth={selectedMonth} 
+          onMonthChange={setSelectedMonth} 
+        />
 
         {/* Budget Alerts */}
         <BudgetAlerts categories={categories} />
 
         {/* Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
           <CategoryPieChart 
             selectedMonth={selectedMonth} 
             onCategoryClick={handleCategoryClick}
@@ -93,9 +75,9 @@ export default function Dashboard() {
 
         {/* Recent Expenses */}
         <Card className="border-border/50">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-lg">
-              Expenses for {format(new Date(`${selectedMonth}-01`), 'MMMM yyyy')}
+          <CardHeader className="flex flex-row items-center justify-between py-3 md:py-4">
+            <CardTitle className="text-base md:text-lg">
+              Recent Expenses
             </CardTitle>
             <Button 
               variant="ghost" 
@@ -105,14 +87,14 @@ export default function Dashboard() {
               View all
             </Button>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-0 px-3 md:px-6">
             {isLoading ? (
-              <div className="flex items-center justify-center py-12">
+              <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
             ) : expenses.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                No expenses for this month
+              <div className="text-center py-8 text-muted-foreground text-sm">
+                No expenses this month
               </div>
             ) : (
               <ExpenseList 

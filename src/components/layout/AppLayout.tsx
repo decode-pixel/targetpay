@@ -11,7 +11,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { 
-  Wallet, 
   LayoutDashboard, 
   Receipt, 
   Tags, 
@@ -25,6 +24,7 @@ import {
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import MobileNav from './MobileNav';
+import appLogo from '@/assets/logo.png';
 
 interface AppLayoutProps {
   children: ReactNode;

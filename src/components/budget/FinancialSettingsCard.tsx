@@ -52,9 +52,18 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
     setHasChanges(true);
   };
 
-  const handleSmartRulesToggle = (enabled: boolean) => {
+  const handleSmartRulesToggle = async (enabled: boolean) => {
     setSmartRulesEnabled(enabled);
-    setHasChanges(true);
+    // Auto-save immediately for instant feedback
+    await updateSettings.mutateAsync({
+      monthly_income: income ? parseFloat(income) : null,
+      budget_mode: budgetMode,
+      needs_percentage: needsPercent,
+      wants_percentage: wantsPercent,
+      savings_percentage: savingsPercent,
+      show_budget_suggestions: showSuggestions,
+      smart_rules_enabled: enabled,
+    });
   };
 
   const handlePercentageChange = (type: 'needs' | 'wants' | 'savings', value: number) => {
@@ -332,7 +341,19 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
               <Switch
                 id="suggestions"
                 checked={showSuggestions}
-                onCheckedChange={(v) => { setShowSuggestions(v); setHasChanges(true); }}
+                onCheckedChange={async (v) => {
+                  setShowSuggestions(v);
+                  // Auto-save immediately
+                  await updateSettings.mutateAsync({
+                    monthly_income: income ? parseFloat(income) : null,
+                    budget_mode: budgetMode,
+                    needs_percentage: needsPercent,
+                    wants_percentage: wantsPercent,
+                    savings_percentage: savingsPercent,
+                    show_budget_suggestions: v,
+                    smart_rules_enabled: smartRulesEnabled,
+                  });
+                }}
               />
             </div>
           </>

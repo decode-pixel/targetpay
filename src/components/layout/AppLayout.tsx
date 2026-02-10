@@ -58,10 +58,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
         <div className="container flex h-14 md:h-16 items-center justify-between px-4">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 md:h-9 md:w-9 items-center justify-center rounded-lg bg-gradient-primary">
-              <Wallet className="h-4 w-4 md:h-5 md:w-5 text-primary-foreground" />
-            </div>
-            <span className="font-semibold text-base md:text-lg">Happy Money</span>
+            <img src={appLogo} alt="TargetPay" className="h-8 w-8 md:h-9 md:w-9 rounded-lg" />
+            <span className="font-semibold text-base md:text-lg">TargetPay</span>
           </Link>
 
           {/* Desktop Navigation */}

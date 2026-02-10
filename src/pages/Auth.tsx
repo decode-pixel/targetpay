@@ -6,8 +6,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Wallet, Mail, Lock, Loader2 } from 'lucide-react';
+import { Mail, Lock, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import appLogo from '@/assets/logo.png';
 import { z } from 'zod';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { lovable } from '@/integrations/lovable';
@@ -125,10 +126,8 @@ export default function Auth() {
       <div className="w-full max-w-md animate-fade-in">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-primary mb-4">
-            <Wallet className="h-8 w-8 text-primary-foreground" />
-          </div>
-          <h1 className="text-2xl font-bold text-foreground">Happy Money</h1>
+          <img src={appLogo} alt="TargetPay" className="w-16 h-16 rounded-2xl mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-foreground">TargetPay</h1>
           <p className="text-muted-foreground mt-1">Track your expenses smartly</p>
         </div>
 

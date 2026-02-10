@@ -11,7 +11,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { 
-  Wallet, 
   LayoutDashboard, 
   Receipt, 
   Tags, 
@@ -25,6 +24,7 @@ import {
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import MobileNav from './MobileNav';
+import appLogo from '@/assets/logo.png';
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -52,16 +52,14 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const userInitials = user?.email?.slice(0, 2).toUpperCase() || 'U';
 
   return (
-    <div className="min-h-screen bg-background pb-20 md:pb-0">
+    <div className="min-h-screen bg-background pb-20 md:pb-0 overflow-y-auto">
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 md:h-16 items-center justify-between px-4">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 md:h-9 md:w-9 items-center justify-center rounded-lg bg-gradient-primary">
-              <Wallet className="h-4 w-4 md:h-5 md:w-5 text-primary-foreground" />
-            </div>
-            <span className="font-semibold text-base md:text-lg">Happy Money</span>
+            <img src={appLogo} alt="TargetPay" className="h-8 w-8 md:h-9 md:w-9 rounded-lg" />
+            <span className="font-semibold text-base md:text-lg">TargetPay</span>
           </Link>
 
           {/* Desktop Navigation */}

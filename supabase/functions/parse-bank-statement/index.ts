@@ -41,19 +41,32 @@ interface Transaction {
   rawText: string;
 }
 
-// PDF password protection detection patterns
-const PASSWORD_PROTECTED_MARKERS = [
-  '/Encrypt',
-  '%PDF-1.',
-];
-
+/**
+ * Detect PDF password protection by scanning the raw PDF bytes for encryption markers.
+ * Scans up to 16KB to handle PDFs where the /Encrypt dictionary appears after the header.
+ */
 function detectPasswordProtection(pdfBuffer: ArrayBuffer): boolean {
-  // Check first 2KB of PDF for encryption markers
-  const headerBytes = new Uint8Array(pdfBuffer.slice(0, 2048));
-  const headerStr = new TextDecoder().decode(headerBytes);
+  // Scan up to 16KB (or full file if smaller) for encryption markers
+  const scanSize = Math.min(pdfBuffer.byteLength, 16384);
+  const bytes = new Uint8Array(pdfBuffer.slice(0, scanSize));
+  const headerStr = new TextDecoder('latin1').decode(bytes);
   
-  // Look for /Encrypt dictionary which indicates encryption
-  return headerStr.includes('/Encrypt');
+  // Primary marker: /Encrypt dictionary indicates PDF-level encryption
+  if (headerStr.includes('/Encrypt')) return true;
+  
+  // Additional markers for various encryption schemes
+  if (headerStr.includes('/EncryptMetadata')) return true;
+  if (headerStr.includes('/StmF') && headerStr.includes('/StrF')) return true;
+  
+  // If the file is larger, also scan the last 4KB (xref/trailer area)
+  if (pdfBuffer.byteLength > scanSize) {
+    const tailSize = Math.min(pdfBuffer.byteLength, 4096);
+    const tailBytes = new Uint8Array(pdfBuffer.slice(pdfBuffer.byteLength - tailSize));
+    const tailStr = new TextDecoder('latin1').decode(tailBytes);
+    if (tailStr.includes('/Encrypt')) return true;
+  }
+  
+  return false;
 }
 
 function detectBank(text: string): string | null {
@@ -66,13 +79,9 @@ function detectBank(text: string): string | null {
 }
 
 function parseDate(dateStr: string): string {
-  // Handle various date formats
   const formats = [
-    // dd/MM/yyyy or dd-MM-yyyy
     /^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/,
-    // dd/MM/yy or dd-MM-yy
     /^(\d{2})[\/\-](\d{2})[\/\-](\d{2})$/,
-    // dd-MMM-yyyy
     /^(\d{2})[\/\-](\w{3})[\/\-](\d{4})$/,
   ];
 
@@ -85,21 +94,15 @@ function parseDate(dateStr: string): string {
     const match = dateStr.match(format);
     if (match) {
       let [_, day, month, year] = match;
-      
-      // Convert month name to number if needed
       if (isNaN(parseInt(month))) {
         month = months[month.toLowerCase().slice(0, 3)] || '01';
       }
-      
-      // Handle 2-digit year
       if (year.length === 2) {
         year = parseInt(year) > 50 ? `19${year}` : `20${year}`;
       }
-      
       return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
     }
   }
-  
   return dateStr;
 }
 
@@ -110,8 +113,6 @@ function parseAmount(amountStr: string): number {
 function extractTransactionsGeneric(text: string): Transaction[] {
   const transactions: Transaction[] = [];
   const lines = text.split('\n');
-  
-  // Generic pattern for transaction lines
   const genericPattern = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})[^\d]*(.*?)([\d,]+\.\d{2})\s*(Dr|Cr|DR|CR|D|C)?\s*([\d,]+\.\d{2})?/gi;
   
   for (const line of lines) {
@@ -122,21 +123,14 @@ function extractTransactionsGeneric(text: string): Transaction[] {
       const amount = parseAmount(match[3]);
       const typeIndicator = match[4]?.toUpperCase();
       const balance = match[5] ? parseAmount(match[5]) : undefined;
-      
-      // Skip if amount is 0 or too small
       if (amount < 1) continue;
-      
-      // Determine transaction type
       let type: 'debit' | 'credit' = 'debit';
       if (typeIndicator === 'CR' || typeIndicator === 'C') {
         type = 'credit';
-      } else if (typeIndicator === 'DR' || typeIndicator === 'D') {
-        type = 'debit';
       }
-      
       transactions.push({
         date: parseDate(dateStr),
-        description: description.slice(0, 200), // Limit description length
+        description: description.slice(0, 200),
         amount,
         type,
         balance,
@@ -144,7 +138,6 @@ function extractTransactionsGeneric(text: string): Transaction[] {
       });
     }
   }
-  
   return transactions;
 }
 
@@ -153,26 +146,19 @@ function extractTransactionsForBank(text: string, bankName: string): Transaction
   if (!pattern) {
     return extractTransactionsGeneric(text);
   }
-  
   const transactions: Transaction[] = [];
   const matches = [...text.matchAll(pattern.transactionPattern)];
-  
   for (const match of matches) {
     const dateStr = match[1];
     const description = match[2]?.trim() || 'Unknown';
     const amount = parseAmount(match[3]);
     const typeIndicator = match[4]?.toUpperCase();
     const balance = match[5] ? parseAmount(match[5]) : undefined;
-    
-    // Skip if amount is 0 or too small
     if (amount < 1) continue;
-    
-    // Determine transaction type
     let type: 'debit' | 'credit' = 'debit';
     if (typeIndicator === 'CR' || typeIndicator === 'C') {
       type = 'credit';
     }
-    
     transactions.push({
       date: parseDate(dateStr),
       description: description.slice(0, 200),
@@ -182,12 +168,9 @@ function extractTransactionsForBank(text: string, bankName: string): Transaction
       rawText: match[0].slice(0, 500),
     });
   }
-  
-  // Fallback to generic if no transactions found
   if (transactions.length === 0) {
     return extractTransactionsGeneric(text);
   }
-  
   return transactions;
 }
 
@@ -228,10 +211,10 @@ serve(async (req) => {
       );
     }
 
-    // Input validation schema - now includes optional password
+    // Input validation schema
     const requestSchema = z.object({
       importId: z.string().uuid({ message: 'Invalid import ID format' }),
-      password: z.string().max(100).optional(), // Optional password for protected PDFs
+      password: z.string().max(100).optional(),
     });
 
     let body;
@@ -272,13 +255,7 @@ serve(async (req) => {
       );
     }
 
-    // Update status to processing
-    await supabase
-      .from('statement_imports')
-      .update({ status: 'processing' })
-      .eq('id', importId);
-
-    // Download file from storage
+    // Download file from storage FIRST — before any processing
     const { data: fileData, error: downloadError } = await supabase.storage
       .from('bank-statements')
       .download(importRecord.file_path);
@@ -296,16 +273,15 @@ serve(async (req) => {
       );
     }
 
-    // Check for duplicate by file hash
     const fileBuffer = await fileData.arrayBuffer();
     const fileHash = await hashFile(fileBuffer);
 
-    // Check if PDF is password protected
+    // ── STEP 1: Password protection check BEFORE any extraction ──
     const isPasswordProtected = detectPasswordProtection(fileBuffer);
     
     if (isPasswordProtected && !password) {
-      // PDF is protected but no password provided
-      console.log('Password-protected PDF detected, requesting password');
+      // PDF is encrypted and no password provided — halt and ask user
+      console.log('Password-protected PDF detected, halting extraction and requesting password');
       await supabase
         .from('statement_imports')
         .update({ 
@@ -326,6 +302,13 @@ serve(async (req) => {
       );
     }
 
+    // ── STEP 2: Only now set status to processing ──
+    await supabase
+      .from('statement_imports')
+      .update({ status: 'processing' })
+      .eq('id', importId);
+
+    // Check for duplicate by file hash
     const { data: existingImport } = await supabase
       .from('statement_imports')
       .select('id, file_name, created_at')
@@ -354,21 +337,18 @@ serve(async (req) => {
       );
     }
 
-    // Use document parsing via Lovable AI for OCR
+    // ── STEP 3: Send to AI for extraction ──
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     
-    // Convert PDF to base64 for the AI
-    // Note: If password was provided, we include it in the prompt for the AI to use
     const base64Data = btoa(
       new Uint8Array(fileBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
     );
     
-    // Password hint for AI (if provided)
-    const passwordContext = password 
-      ? `\nThis PDF is password protected. The password is: ${password}\nPlease use this password to decrypt and read the document.`
+    // If password-protected and password provided, include instruction for AI
+    const passwordInstruction = (isPasswordProtected && password)
+      ? `\nIMPORTANT: This PDF is password-protected. The document password is: ${password}\nUse this password to decrypt and read the document content.`
       : '';
 
-    // Use Gemini for document understanding with OCR
     const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -380,38 +360,7 @@ serve(async (req) => {
         messages: [
           {
             role: 'system',
-            content: `You are a bank statement parser. Extract all transactions from the provided bank statement.
-
-For each transaction, extract:
-- date: The transaction date in YYYY-MM-DD format
-- description: The transaction description/narration (merchant name, payment reference, etc.)
-- amount: The transaction amount as a number (without currency symbols)
-- type: "debit" for money out, "credit" for money in
-- balance: The balance after transaction (if available)
-
-Also identify:
-- bankName: The bank name (SBI, HDFC, ICICI, Axis, or Other)
-- periodStart: Statement period start date (YYYY-MM-DD)
-- periodEnd: Statement period end date (YYYY-MM-DD)
-
-Return a JSON object with this structure:
-{
-  "bankName": "string",
-  "periodStart": "string or null",
-  "periodEnd": "string or null", 
-  "transactions": [
-    {
-      "date": "YYYY-MM-DD",
-      "description": "string",
-      "amount": number,
-      "type": "debit" | "credit",
-      "balance": number or null
-    }
-  ]
-}
-
-Focus on extracting DEBIT transactions (expenses). Skip credits unless they are refunds.
-Parse carefully - bank statements can have complex layouts.`
+            content: `You are a bank statement parser. Extract all transactions from the provided bank statement.${passwordInstruction}\n\nFor each transaction, extract:\n- date: The transaction date in YYYY-MM-DD format\n- description: The transaction description/narration (merchant name, payment reference, etc.)\n- amount: The transaction amount as a number (without currency symbols)\n- type: "debit" for money out, "credit" for money in\n- balance: The balance after transaction (if available)\n\nAlso identify:\n- bankName: The bank name (SBI, HDFC, ICICI, Axis, or Other)\n- periodStart: Statement period start date (YYYY-MM-DD)\n- periodEnd: Statement period end date (YYYY-MM-DD)\n\nReturn a JSON object with this structure:\n{\n  "bankName": "string",\n  "periodStart": "string or null",\n  "periodEnd": "string or null", \n  "transactions": [\n    {\n      "date": "YYYY-MM-DD",\n      "description": "string",\n      "amount": number,\n      "type": "debit" | "credit",\n      "balance": number or null\n    }\n  ]\n}\n\nFocus on extracting DEBIT transactions (expenses). Skip credits unless they are refunds.\nParse carefully - bank statements can have complex layouts.\nIf the document is encrypted or unreadable, return: {\"error\": \"encrypted\", \"transactions\": []}`
           },
           {
             role: 'user',
@@ -438,6 +387,27 @@ Parse carefully - bank statements can have complex layouts.`
       const errorText = await aiResponse.text();
       console.error('AI parsing failed:', aiResponse.status, errorText);
       
+      // If this was a password attempt, give a specific error
+      if (isPasswordProtected && password) {
+        await supabase
+          .from('statement_imports')
+          .update({ 
+            status: 'password_required', 
+            error_message: 'Could not read the PDF with the provided password. Please check and try again.' 
+          })
+          .eq('id', importId);
+        
+        return new Response(
+          JSON.stringify({ 
+            success: false, 
+            error: 'Incorrect password or unreadable PDF',
+            passwordRequired: true,
+            message: 'Could not read the PDF with the provided password. Please try again.'
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
       await supabase
         .from('statement_imports')
         .update({ status: 'failed', error_message: 'Failed to parse PDF. Please ensure it is a valid bank statement.' })
@@ -457,11 +427,32 @@ Parse carefully - bank statements can have complex layouts.`
     // Parse the JSON from AI response
     let parsedData;
     try {
-      // Extract JSON from markdown code blocks if present
       const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, content];
       parsedData = JSON.parse(jsonMatch[1].trim());
     } catch (e) {
       console.error('Failed to parse AI response as JSON:', e);
+      
+      // If password-protected, the AI likely couldn't read it — ask for password retry
+      if (isPasswordProtected && password) {
+        await supabase
+          .from('statement_imports')
+          .update({ 
+            status: 'password_required', 
+            error_message: 'The password may be incorrect, or the PDF format is not supported. Please try again.' 
+          })
+          .eq('id', importId);
+        
+        return new Response(
+          JSON.stringify({ 
+            success: false, 
+            error: 'Incorrect password',
+            passwordRequired: true,
+            message: 'Could not extract data. The password may be incorrect. Please try again.'
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
       await supabase
         .from('statement_imports')
         .update({ status: 'failed', error_message: 'Failed to extract transactions from statement' })
@@ -473,12 +464,62 @@ Parse carefully - bank statements can have complex layouts.`
       );
     }
 
+    // Check if AI explicitly reported the document as encrypted/unreadable
+    if (parsedData.error === 'encrypted') {
+      console.log('AI reported document as encrypted');
+      await supabase
+        .from('statement_imports')
+        .update({ 
+          status: 'password_required', 
+          error_message: password 
+            ? 'The password appears to be incorrect. Please try again.'
+            : 'This document is encrypted. Please provide the password.',
+          file_hash: fileHash 
+        })
+        .eq('id', importId);
+      
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: 'Password required',
+          passwordRequired: true,
+          message: password 
+            ? 'The password appears to be incorrect. Please try again.'
+            : 'This document is encrypted. Please provide the password.'
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const { bankName, periodStart, periodEnd, transactions = [] } = parsedData;
 
     // Filter to only debit transactions (expenses)
     const debitTransactions = transactions.filter((t: any) => t.type === 'debit' && t.amount > 0);
 
     if (debitTransactions.length === 0) {
+      // If password was provided but no transactions found, it may be a wrong password
+      if (isPasswordProtected && password) {
+        await supabase
+          .from('statement_imports')
+          .update({ 
+            status: 'password_required', 
+            error_message: 'No transactions found. The password may be incorrect. Please try again.',
+            file_hash: fileHash,
+            bank_name: bankName
+          })
+          .eq('id', importId);
+        
+        return new Response(
+          JSON.stringify({ 
+            success: false, 
+            error: 'No transactions found — password may be incorrect',
+            passwordRequired: true,
+            message: 'No transactions could be extracted. Please verify the password and try again.'
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
       await supabase
         .from('statement_imports')
         .update({ 
@@ -503,7 +544,6 @@ Parse carefully - bank statements can have complex layouts.`
 
     // Insert extracted transactions
     const extractedTransactions = debitTransactions.map((t: any) => {
-      // Check if this transaction might be a duplicate
       const possibleDuplicate = existingExpenses?.find(e => 
         e.date === t.date && 
         Math.abs(Number(e.amount) - t.amount) < 0.01
@@ -520,7 +560,7 @@ Parse carefully - bank statements can have complex layouts.`
         raw_text: JSON.stringify(t),
         is_duplicate: !!possibleDuplicate,
         duplicate_of: possibleDuplicate?.id || null,
-        is_selected: !possibleDuplicate, // Unselect duplicates by default
+        is_selected: !possibleDuplicate,
       };
     });
 
@@ -541,7 +581,7 @@ Parse carefully - bank statements can have complex layouts.`
       );
     }
 
-    // Update import record
+    // Update import record — extraction successful
     await supabase
       .from('statement_imports')
       .update({
@@ -554,6 +594,8 @@ Parse carefully - bank statements can have complex layouts.`
       })
       .eq('id', importId);
 
+    // Password is NOT stored or logged — it was only used in the AI prompt above
+    // and goes out of scope here.
     console.log(`Extracted ${debitTransactions.length} transactions from ${bankName} statement`);
 
     return new Response(

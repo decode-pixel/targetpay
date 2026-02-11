@@ -152,12 +152,14 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
       const result = await parseMutation.mutateAsync({ importId, password });
       
       if (result.passwordRequired) {
-        // Password was incorrect
-        setPasswordError('Incorrect password. Please try again.');
+        // Password was incorrect or PDF still unreadable — stay on password step
+        setPasswordError(result.message || 'Incorrect password. Please try again.');
+        // Re-fetch import to sync status
+        await refetchImport();
         return;
       }
       
-      // Password worked, continue to processing
+      // Password worked — extraction will proceed, move to processing
       setStep('processing');
       await refetchImport();
     } catch (error) {

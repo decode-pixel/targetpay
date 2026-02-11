@@ -349,60 +349,92 @@ serve(async (req) => {
       ? `\nIMPORTANT: This PDF is password-protected. The document password is: ${password}\nUse this password to decrypt and read the document content.`
       : '';
 
-    const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          {
-            role: 'system',
-            content: `You are a bank statement parser. Extract all transactions from the provided bank statement.${passwordInstruction}\n\nFor each transaction, extract:\n- date: The transaction date in YYYY-MM-DD format\n- description: The transaction description/narration (merchant name, payment reference, etc.)\n- amount: The transaction amount as a number (without currency symbols)\n- type: "debit" for money out, "credit" for money in\n- balance: The balance after transaction (if available)\n\nAlso identify:\n- bankName: The bank name (SBI, HDFC, ICICI, Axis, or Other)\n- periodStart: Statement period start date (YYYY-MM-DD)\n- periodEnd: Statement period end date (YYYY-MM-DD)\n\nReturn a JSON object with this structure:\n{\n  "bankName": "string",\n  "periodStart": "string or null",\n  "periodEnd": "string or null", \n  "transactions": [\n    {\n      "date": "YYYY-MM-DD",\n      "description": "string",\n      "amount": number,\n      "type": "debit" | "credit",\n      "balance": number or null\n    }\n  ]\n}\n\nFocus on extracting DEBIT transactions (expenses). Skip credits unless they are refunds.\nParse carefully - bank statements can have complex layouts.\nIf the document is encrypted or unreadable, return: {\"error\": \"encrypted\", \"transactions\": []}`
-          },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: 'Please extract all transactions from this bank statement PDF. Focus on debit/expense transactions.'
-              },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: `data:application/pdf;base64,${base64Data}`
+    // Use AbortController for timeout (90 seconds max for AI extraction)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 90000);
+
+    let aiResponse: Response;
+    try {
+      aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages: [
+            {
+              role: 'system',
+              content: `You are a bank statement parser. Extract all transactions from the provided bank statement.${passwordInstruction}\n\nFor each transaction, extract:\n- date: The transaction date in YYYY-MM-DD format\n- description: The transaction description/narration (merchant name, payment reference, etc.)\n- amount: The transaction amount as a number (without currency symbols)\n- type: "debit" for money out, "credit" for money in\n- balance: The balance after transaction (if available)\n\nAlso identify:\n- bankName: The bank name (SBI, HDFC, ICICI, Axis, or Other)\n- periodStart: Statement period start date (YYYY-MM-DD)\n- periodEnd: Statement period end date (YYYY-MM-DD)\n\nReturn a JSON object with this structure:\n{\n  "bankName": "string",\n  "periodStart": "string or null",\n  "periodEnd": "string or null", \n  "transactions": [\n    {\n      "date": "YYYY-MM-DD",\n      "description": "string",\n      "amount": number,\n      "type": "debit" | "credit",\n      "balance": number or null\n    }\n  ]\n}\n\nFocus on extracting DEBIT transactions (expenses). Skip credits unless they are refunds.\nParse carefully - bank statements can have complex layouts.\nIf the document is encrypted or unreadable, return: {\"error\": \"encrypted\", \"transactions\": []}`
+            },
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: 'Please extract all transactions from this bank statement PDF. Focus on debit/expense transactions.'
+                },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: `data:application/pdf;base64,${base64Data}`
+                  }
                 }
-              }
-            ]
-          }
-        ],
-        temperature: 0.1,
-        max_tokens: 8000,
-      }),
-    });
+              ]
+            }
+          ],
+          temperature: 0.1,
+          max_tokens: 8000,
+        }),
+        signal: controller.signal,
+      });
+    } catch (abortError) {
+      clearTimeout(timeoutId);
+      console.error('AI request timed out or aborted:', abortError);
+      
+      const timeoutMessage = isPasswordProtected && password
+        ? 'Processing timed out. The password may be incorrect or the file is too large. Please try again.'
+        : 'Processing timed out. Please try again with a smaller file.';
+      const timeoutStatus = isPasswordProtected && password ? 'password_required' : 'failed';
+      
+      await supabase
+        .from('statement_imports')
+        .update({ status: timeoutStatus, error_message: timeoutMessage })
+        .eq('id', importId);
+      
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: timeoutMessage,
+          passwordRequired: isPasswordProtected && !!password,
+          message: timeoutMessage,
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();
       console.error('AI parsing failed:', aiResponse.status, errorText);
       
-      // If this was a password attempt, give a specific error
       if (isPasswordProtected && password) {
         await supabase
           .from('statement_imports')
           .update({ 
             status: 'password_required', 
-            error_message: 'Could not read the PDF with the provided password. Please check and try again.' 
+            error_message: 'Incorrect password. Please try again.' 
           })
           .eq('id', importId);
         
         return new Response(
           JSON.stringify({ 
             success: false, 
-            error: 'Incorrect password or unreadable PDF',
+            error: 'Incorrect password',
             passwordRequired: true,
-            message: 'Could not read the PDF with the provided password. Please try again.'
+            message: 'Incorrect password. Please try again.'
           }),
           { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );

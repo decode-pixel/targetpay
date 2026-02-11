@@ -71,6 +71,8 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
   const [localTransactions, setLocalTransactions] = useState<ExtractedTransaction[]>([]);
   const [suggestedCategories, setSuggestedCategories] = useState<{ name: string; icon: string; color: string }[]>([]);
   const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [processingStatus, setProcessingStatus] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { data: categories = [] } = useCategories();
   const { data: importRecord, refetch: refetchImport } = useStatementImport(importId);
@@ -120,6 +122,8 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
 
   const handleUpload = async (file: File) => {
     setUploadProgress(0);
+    setIsSubmitting(true);
+    setProcessingStatus('Uploading statement...');
     
     const progressInterval = setInterval(() => {
       setUploadProgress(prev => Math.min(prev + 10, 90));
@@ -130,40 +134,49 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
       setImportId(result.id);
       setUploadProgress(100);
       
+      setProcessingStatus('Checking password protection...');
       setStep('processing');
       const parseResult = await parseMutation.mutateAsync({ importId: result.id });
       
-      // Check if password is required
       if (parseResult.passwordRequired) {
+        setProcessingStatus('');
         setStep('password_required');
+      } else {
+        setProcessingStatus('Extracting transactions...');
       }
     } catch (error) {
-      // Error handled by mutation
+      setProcessingStatus('');
     } finally {
       clearInterval(progressInterval);
+      setIsSubmitting(false);
     }
   };
   
   const handlePasswordSubmit = async (password: string) => {
-    if (!importId) return;
+    if (!importId || isSubmitting) return;
     setPasswordError(null);
+    setIsSubmitting(true);
+    setProcessingStatus('Unlocking PDF...');
     
     try {
       const result = await parseMutation.mutateAsync({ importId, password });
       
       if (result.passwordRequired) {
-        // Password was incorrect or PDF still unreadable — stay on password step
         setPasswordError(result.message || 'Incorrect password. Please try again.');
-        // Re-fetch import to sync status
+        setProcessingStatus('');
+        setIsSubmitting(false);
         await refetchImport();
         return;
       }
       
-      // Password worked — extraction will proceed, move to processing
+      setProcessingStatus('Extracting transactions...');
       setStep('processing');
       await refetchImport();
     } catch (error) {
-      setPasswordError(error instanceof Error ? error.message : 'Failed to process statement');
+      setPasswordError(error instanceof Error ? error.message : 'Something went wrong. Please try again.');
+      setProcessingStatus('');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -210,6 +223,8 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
     setLocalTransactions([]);
     setSuggestedCategories([]);
     setPasswordError(null);
+    setProcessingStatus('');
+    setIsSubmitting(false);
   };
 
   const handleTransactionUpdate = useCallback((id: string, updates: Partial<ExtractedTransaction>) => {
@@ -295,28 +310,37 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
 
         {step === 'processing' && (
           <div className="text-center py-8 md:py-12 space-y-4 md:space-y-6">
-            <Loader2 className="h-12 w-12 md:h-16 md:w-16 mx-auto text-primary animate-spin" />
-            <div className="space-y-2">
-              <h3 className="text-base md:text-lg font-semibold">
-                {parseMutation.isPending ? 'Extracting transactions...' : 'Processing...'}
-              </h3>
-              <p className="text-sm text-muted-foreground px-4">
-                Using AI to read and extract transactions from your statement
-              </p>
-              {importRecord?.bank_name && (
-                <p className="text-sm text-primary">
-                  Detected: {importRecord.bank_name} Bank Statement
-                </p>
-              )}
-            </div>
-            {importRecord?.status === 'failed' && (
-              <Alert variant="destructive" className="max-w-md mx-auto">
-                <XCircle className="h-4 w-4" />
-                <AlertTitle>Extraction Failed</AlertTitle>
-                <AlertDescription>
-                  {importRecord.error_message || 'Failed to extract transactions from the statement'}
-                </AlertDescription>
-              </Alert>
+            {importRecord?.status === 'failed' ? (
+              <>
+                <XCircle className="h-12 w-12 md:h-16 md:w-16 mx-auto text-destructive" />
+                <Alert variant="destructive" className="max-w-md mx-auto">
+                  <XCircle className="h-4 w-4" />
+                  <AlertTitle>Extraction Failed</AlertTitle>
+                  <AlertDescription>
+                    {importRecord.error_message || 'Failed to extract transactions from the statement'}
+                  </AlertDescription>
+                </Alert>
+                <Button variant="outline" onClick={handleCancel}>
+                  Try Again
+                </Button>
+              </>
+            ) : (
+              <>
+                <Loader2 className="h-12 w-12 md:h-16 md:w-16 mx-auto text-primary animate-spin" />
+                <div className="space-y-2">
+                  <h3 className="text-base md:text-lg font-semibold">
+                    {processingStatus || 'Processing...'}
+                  </h3>
+                  <p className="text-sm text-muted-foreground px-4">
+                    Using AI to read and extract transactions from your statement
+                  </p>
+                  {importRecord?.bank_name && (
+                    <p className="text-sm text-primary">
+                      Detected: {importRecord.bank_name} Bank Statement
+                    </p>
+                  )}
+                </div>
+              </>
             )}
           </div>
         )}
@@ -326,7 +350,7 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
             fileName={importRecord.file_name}
             onSubmit={handlePasswordSubmit}
             onCancel={handleCancel}
-            isProcessing={parseMutation.isPending}
+            isProcessing={isSubmitting || parseMutation.isPending}
             error={passwordError}
           />
         )}

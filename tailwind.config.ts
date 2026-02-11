@@ -87,7 +87,7 @@ export default {
   		},
   		fontFamily: {
   			sans: [
-  				'Lato',
+  				'Inter',
   				'ui-sans-serif',
   				'system-ui',
   				'-apple-system',
@@ -100,7 +100,7 @@ export default {
   				'sans-serif'
   			],
   			serif: [
-  				'EB Garamond',
+  				'Lora',
   				'ui-serif',
   				'Georgia',
   				'Cambria',
@@ -109,7 +109,7 @@ export default {
   				'serif'
   			],
   			mono: [
-  				'Fira Code',
+  				'Space Mono',
   				'ui-monospace',
   				'SFMono-Regular',
   				'Menlo',
@@ -174,8 +174,8 @@ export default {
   			'scale-in': 'scale-in 0.2s ease-out'
   		},
   		boxShadow: {
-  			'card': 'var(--shadow-card)',
-  			'elevated': 'var(--shadow-elevated)',
+  			card: 'var(--shadow-card)',
+  			elevated: 'var(--shadow-elevated)',
   			'2xs': 'var(--shadow-2xs)',
   			xs: 'var(--shadow-xs)',
   			sm: 'var(--shadow-sm)',

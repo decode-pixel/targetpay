@@ -47,7 +47,7 @@ export function useStatementImport(importId: string | null) {
     enabled: !!user && !!importId,
     refetchInterval: (query) => {
       const data = query.state.data as StatementImport | null;
-      // Poll while processing
+      // Poll while actively processing — stop for password_required, extracted, ready, failed, completed
       if (data && ['pending', 'processing', 'categorizing'].includes(data.status)) {
         return 2000;
       }

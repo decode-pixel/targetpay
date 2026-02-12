@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Upload, 
@@ -53,7 +53,6 @@ interface ImportWizardDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-// Updated steps to include month review
 const STEPS: { key: ImportWizardStep; label: string; icon: React.ReactNode }[] = [
   { key: 'upload', label: 'Upload', icon: <Upload className="h-4 w-4" /> },
   { key: 'processing', label: 'Extract', icon: <Loader2 className="h-4 w-4" /> },
@@ -61,6 +60,9 @@ const STEPS: { key: ImportWizardStep; label: string; icon: React.ReactNode }[] =
   { key: 'categorize', label: 'Categorize', icon: <Sparkles className="h-4 w-4" /> },
   { key: 'confirm', label: 'Confirm', icon: <Calendar className="h-4 w-4" /> },
 ];
+
+// Max time to wait for backend before showing timeout error
+const PROCESSING_TIMEOUT_MS = 120_000; // 2 minutes
 
 export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardDialogProps) {
   const navigate = useNavigate();
@@ -72,7 +74,10 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
   const [suggestedCategories, setSuggestedCategories] = useState<{ name: string; icon: string; color: string }[]>([]);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [processingStatus, setProcessingStatus] = useState<string>('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmittingPassword, setIsSubmittingPassword] = useState(false);
+  const [processingError, setProcessingError] = useState<string | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const processingStartRef = useRef<number | null>(null);
 
   const { data: categories = [] } = useCategories();
   const { data: importRecord, refetch: refetchImport } = useStatementImport(importId);
@@ -85,6 +90,13 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
   const updateTransaction = useUpdateExtractedTransaction();
   const deleteImport = useDeleteImport();
 
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
   // Sync local transactions with fetched data
   useEffect(() => {
     if (extractedTransactions.length > 0) {
@@ -92,19 +104,53 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
     }
   }, [extractedTransactions]);
 
-  // Watch import status and advance steps
+  // Start a processing timeout - if backend doesn't respond within limit, show error
+  const startProcessingTimeout = useCallback(() => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    processingStartRef.current = Date.now();
+    timeoutRef.current = setTimeout(() => {
+      setProcessingError('Processing timed out. Please try again.');
+      setProcessingStatus('');
+      setIsSubmittingPassword(false);
+      setStep('processing'); // Show error in processing view
+    }, PROCESSING_TIMEOUT_MS);
+  }, []);
+
+  const clearProcessingTimeout = useCallback(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    processingStartRef.current = null;
+  }, []);
+
+  // Watch import status from polling and advance steps
   useEffect(() => {
     if (!importRecord) return;
 
     switch (importRecord.status) {
       case 'pending':
+        setStep('processing');
+        setProcessingStatus('Checking password protection...');
+        break;
       case 'processing':
         setStep('processing');
+        setProcessingStatus('Extracting transactions...');
+        setProcessingError(null);
         break;
       case 'password_required':
+        clearProcessingTimeout();
         setStep('password_required');
+        setProcessingStatus('');
+        // If we were submitting a password and got back to password_required, it was wrong
+        if (isSubmittingPassword) {
+          setPasswordError(importRecord.error_message || 'Incorrect password. Please try again.');
+          setIsSubmittingPassword(false);
+        }
         break;
       case 'extracted':
+        clearProcessingTimeout();
+        setProcessingError(null);
         setStep('preview');
         refetchTransactions();
         break;
@@ -112,17 +158,23 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
         setStep('categorize');
         break;
       case 'ready':
+        clearProcessingTimeout();
         setStep('confirm');
         refetchTransactions();
         break;
       case 'failed':
+        clearProcessingTimeout();
+        setProcessingError(importRecord.error_message || 'Failed to process statement.');
+        setProcessingStatus('');
+        setIsSubmittingPassword(false);
+        setStep('processing');
         break;
     }
-  }, [importRecord?.status, refetchTransactions]);
+  }, [importRecord?.status, importRecord?.error_message, importRecord?.updated_at, refetchTransactions, clearProcessingTimeout, isSubmittingPassword]);
 
   const handleUpload = async (file: File) => {
     setUploadProgress(0);
-    setIsSubmitting(true);
+    setProcessingError(null);
     setProcessingStatus('Uploading statement...');
     
     const progressInterval = setInterval(() => {
@@ -133,51 +185,84 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
       const result = await uploadMutation.mutateAsync(file);
       setImportId(result.id);
       setUploadProgress(100);
-      
-      setProcessingStatus('Checking password protection...');
       setStep('processing');
-      const parseResult = await parseMutation.mutateAsync({ importId: result.id });
-      
-      if (parseResult.passwordRequired) {
-        setProcessingStatus('');
-        setStep('password_required');
-      } else {
-        setProcessingStatus('Extracting transactions...');
-      }
+      setProcessingStatus('Checking password protection...');
+
+      // Start timeout protection
+      startProcessingTimeout();
+
+      // Fire-and-forget: don't await the parse call
+      // Polling will detect status changes (password_required, extracted, failed)
+      parseMutation.mutate(
+        { importId: result.id },
+        {
+          onSuccess: (parseResult) => {
+            if (parseResult.passwordRequired) {
+              clearProcessingTimeout();
+              setStep('password_required');
+              setProcessingStatus('');
+            }
+            // Other states handled by polling
+          },
+          onError: (error) => {
+            clearProcessingTimeout();
+            setProcessingError(error instanceof Error ? error.message : 'Failed to process statement.');
+            setProcessingStatus('');
+          },
+        }
+      );
     } catch (error) {
+      setProcessingError(error instanceof Error ? error.message : 'Upload failed.');
       setProcessingStatus('');
     } finally {
       clearInterval(progressInterval);
-      setIsSubmitting(false);
     }
   };
   
   const handlePasswordSubmit = async (password: string) => {
-    if (!importId || isSubmitting) return;
+    if (!importId || isSubmittingPassword) return;
     setPasswordError(null);
-    setIsSubmitting(true);
+    setIsSubmittingPassword(true);
     setProcessingStatus('Unlocking PDF...');
-    
-    try {
-      const result = await parseMutation.mutateAsync({ importId, password });
-      
-      if (result.passwordRequired) {
-        setPasswordError(result.message || 'Incorrect password. Please try again.');
-        setProcessingStatus('');
-        setIsSubmitting(false);
-        await refetchImport();
-        return;
+
+    // Start timeout for password validation
+    startProcessingTimeout();
+
+    // Fire-and-forget: don't await
+    parseMutation.mutate(
+      { importId, password },
+      {
+        onSuccess: (result) => {
+          if (result.passwordRequired) {
+            // Wrong password - stay on password screen
+            clearProcessingTimeout();
+            setPasswordError(result.message || 'Incorrect password. Please try again.');
+            setProcessingStatus('');
+            setIsSubmittingPassword(false);
+            refetchImport();
+          } else {
+            // Correct password - move to processing, polling will advance to preview
+            setStep('processing');
+            setProcessingStatus('Extracting transactions...');
+            // isSubmittingPassword stays true until polling detects extracted/failed
+          }
+        },
+        onError: (error) => {
+          clearProcessingTimeout();
+          setPasswordError(error instanceof Error ? error.message : 'Something went wrong. Please try again.');
+          setProcessingStatus('');
+          setIsSubmittingPassword(false);
+        },
       }
-      
-      setProcessingStatus('Extracting transactions...');
-      setStep('processing');
-      await refetchImport();
-    } catch (error) {
-      setPasswordError(error instanceof Error ? error.message : 'Something went wrong. Please try again.');
-      setProcessingStatus('');
-    } finally {
-      setIsSubmitting(false);
-    }
+    );
+  };
+
+  const handleCancelPassword = async () => {
+    clearProcessingTimeout();
+    setIsSubmittingPassword(false);
+    setPasswordError(null);
+    setProcessingStatus('');
+    await handleCancel();
   };
 
   const handleCategorize = async () => {
@@ -209,6 +294,7 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
   };
 
   const handleCancel = async () => {
+    clearProcessingTimeout();
     if (importId) {
       await deleteImport.mutateAsync(importId);
     }
@@ -216,7 +302,21 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
     onOpenChange(false);
   };
 
+  const handleRetry = () => {
+    clearProcessingTimeout();
+    setProcessingError(null);
+    setProcessingStatus('');
+    setIsSubmittingPassword(false);
+    setPasswordError(null);
+    if (importId) {
+      deleteImport.mutate(importId);
+    }
+    setImportId(null);
+    setStep('upload');
+  };
+
   const resetWizard = () => {
+    clearProcessingTimeout();
     setStep('upload');
     setImportId(null);
     setUploadProgress(0);
@@ -224,7 +324,8 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
     setSuggestedCategories([]);
     setPasswordError(null);
     setProcessingStatus('');
-    setIsSubmitting(false);
+    setIsSubmittingPassword(false);
+    setProcessingError(null);
   };
 
   const handleTransactionUpdate = useCallback((id: string, updates: Partial<ExtractedTransaction>) => {
@@ -268,7 +369,7 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
 
   const content = (
     <>
-      {/* Progress steps - simplified for mobile */}
+      {/* Progress steps */}
       <div className="flex items-center justify-between px-2 md:px-4 py-2 bg-muted/30 rounded-lg mb-4 overflow-x-auto">
         {STEPS.map((s, index) => (
           <div 
@@ -310,17 +411,17 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
 
         {step === 'processing' && (
           <div className="text-center py-8 md:py-12 space-y-4 md:space-y-6">
-            {importRecord?.status === 'failed' ? (
+            {(processingError || importRecord?.status === 'failed') ? (
               <>
                 <XCircle className="h-12 w-12 md:h-16 md:w-16 mx-auto text-destructive" />
                 <Alert variant="destructive" className="max-w-md mx-auto">
                   <XCircle className="h-4 w-4" />
-                  <AlertTitle>Extraction Failed</AlertTitle>
+                  <AlertTitle>Processing Failed</AlertTitle>
                   <AlertDescription>
-                    {importRecord.error_message || 'Failed to extract transactions from the statement'}
+                    {processingError || importRecord?.error_message || 'Failed to extract transactions from the statement'}
                   </AlertDescription>
                 </Alert>
-                <Button variant="outline" onClick={handleCancel}>
+                <Button variant="outline" onClick={handleRetry}>
                   Try Again
                 </Button>
               </>
@@ -349,8 +450,8 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
           <PasswordInputDialog
             fileName={importRecord.file_name}
             onSubmit={handlePasswordSubmit}
-            onCancel={handleCancel}
-            isProcessing={isSubmitting || parseMutation.isPending}
+            onCancel={handleCancelPassword}
+            isProcessing={isSubmittingPassword}
             error={passwordError}
           />
         )}
@@ -399,7 +500,6 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
 
         {step === 'confirm' && (
           <div className="space-y-4">
-            {/* Show suggested categories at top */}
             {suggestedCategories.length > 0 && (
               <SuggestedCategories
                 suggestions={suggestedCategories}
@@ -407,7 +507,6 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
               />
             )}
 
-            {/* Month-grouped preview with confirmation */}
             <MonthGroupedPreview
               transactions={localTransactions.filter(t => t.is_selected)}
               onConfirm={handleImport}
@@ -418,7 +517,7 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
         )}
       </div>
 
-      {/* Footer actions - only show for non-confirm steps */}
+      {/* Footer actions */}
       {step !== 'confirm' && (
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t mt-4">
           <Button variant="ghost" onClick={handleCancel} className="order-2 sm:order-1">

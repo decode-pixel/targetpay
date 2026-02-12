@@ -47,9 +47,13 @@ export function useStatementImport(importId: string | null) {
     enabled: !!user && !!importId,
     refetchInterval: (query) => {
       const data = query.state.data as StatementImport | null;
-      // Poll while actively processing — stop for password_required, extracted, ready, failed, completed
+      // Poll while actively processing — stop for extracted, ready, failed, completed
       if (data && ['pending', 'processing', 'categorizing'].includes(data.status)) {
         return 2000;
+      }
+      // Also poll during password_required to detect if status changes after password submit
+      if (data && data.status === 'password_required') {
+        return 3000;
       }
       return false;
     },

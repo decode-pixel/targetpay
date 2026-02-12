@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
+import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { z } from "https://esm.sh/zod@3.23.8";
 
 const corsHeaders = {
@@ -8,57 +9,15 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-// Bank-specific parsing patterns for major Indian banks
-const BANK_PATTERNS = {
-  SBI: {
-    identifier: /State Bank of India|SBI/i,
-    dateFormats: ['dd/MM/yyyy', 'dd-MM-yyyy'],
-    transactionPattern: /(\d{2}[\/\-]\d{2}[\/\-]\d{4})\s+(.+?)\s+([\d,]+\.\d{2})\s*(Dr|Cr)?\s*([\d,]+\.\d{2})?/gi,
-  },
-  HDFC: {
-    identifier: /HDFC Bank/i,
-    dateFormats: ['dd/MM/yy', 'dd-MM-yy'],
-    transactionPattern: /(\d{2}[\/\-]\d{2}[\/\-]\d{2,4})\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})?/gi,
-  },
-  ICICI: {
-    identifier: /ICICI Bank/i,
-    dateFormats: ['dd-MMM-yyyy', 'dd/MM/yyyy'],
-    transactionPattern: /(\d{2}[-\/]\w{3}[-\/]\d{4}|\d{2}[\/\-]\d{2}[\/\-]\d{4})\s+(.+?)\s+([\d,]+\.\d{2})\s*(DR|CR)?\s*([\d,]+\.\d{2})?/gi,
-  },
-  AXIS: {
-    identifier: /Axis Bank/i,
-    dateFormats: ['dd-MM-yyyy', 'dd/MM/yyyy'],
-    transactionPattern: /(\d{2}[-\/]\d{2}[-\/]\d{4})\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})?/gi,
-  },
-};
-
-interface Transaction {
-  date: string;
-  description: string;
-  amount: number;
-  type: 'debit' | 'credit';
-  balance?: number;
-  rawText: string;
-}
-
-/**
- * Detect PDF password protection by scanning the raw PDF bytes for encryption markers.
- * Scans up to 16KB to handle PDFs where the /Encrypt dictionary appears after the header.
- */
 function detectPasswordProtection(pdfBuffer: ArrayBuffer): boolean {
-  // Scan up to 16KB (or full file if smaller) for encryption markers
   const scanSize = Math.min(pdfBuffer.byteLength, 16384);
   const bytes = new Uint8Array(pdfBuffer.slice(0, scanSize));
   const headerStr = new TextDecoder('latin1').decode(bytes);
   
-  // Primary marker: /Encrypt dictionary indicates PDF-level encryption
   if (headerStr.includes('/Encrypt')) return true;
-  
-  // Additional markers for various encryption schemes
   if (headerStr.includes('/EncryptMetadata')) return true;
   if (headerStr.includes('/StmF') && headerStr.includes('/StrF')) return true;
   
-  // If the file is larger, also scan the last 4KB (xref/trailer area)
   if (pdfBuffer.byteLength > scanSize) {
     const tailSize = Math.min(pdfBuffer.byteLength, 4096);
     const tailBytes = new Uint8Array(pdfBuffer.slice(pdfBuffer.byteLength - tailSize));
@@ -69,115 +28,18 @@ function detectPasswordProtection(pdfBuffer: ArrayBuffer): boolean {
   return false;
 }
 
-function detectBank(text: string): string | null {
-  for (const [bankName, pattern] of Object.entries(BANK_PATTERNS)) {
-    if (pattern.identifier.test(text)) {
-      return bankName;
-    }
-  }
-  return null;
-}
-
-function parseDate(dateStr: string): string {
-  const formats = [
-    /^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/,
-    /^(\d{2})[\/\-](\d{2})[\/\-](\d{2})$/,
-    /^(\d{2})[\/\-](\w{3})[\/\-](\d{4})$/,
-  ];
-
-  const months: Record<string, string> = {
-    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
-    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
-  };
-
-  for (const format of formats) {
-    const match = dateStr.match(format);
-    if (match) {
-      let [_, day, month, year] = match;
-      if (isNaN(parseInt(month))) {
-        month = months[month.toLowerCase().slice(0, 3)] || '01';
-      }
-      if (year.length === 2) {
-        year = parseInt(year) > 50 ? `19${year}` : `20${year}`;
-      }
-      return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-    }
-  }
-  return dateStr;
-}
-
-function parseAmount(amountStr: string): number {
-  return parseFloat(amountStr.replace(/,/g, ''));
-}
-
-function extractTransactionsGeneric(text: string): Transaction[] {
-  const transactions: Transaction[] = [];
-  const lines = text.split('\n');
-  const genericPattern = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})[^\d]*(.*?)([\d,]+\.\d{2})\s*(Dr|Cr|DR|CR|D|C)?\s*([\d,]+\.\d{2})?/gi;
-  
-  for (const line of lines) {
-    const matches = [...line.matchAll(genericPattern)];
-    for (const match of matches) {
-      const dateStr = match[1];
-      const description = match[2]?.trim() || 'Unknown';
-      const amount = parseAmount(match[3]);
-      const typeIndicator = match[4]?.toUpperCase();
-      const balance = match[5] ? parseAmount(match[5]) : undefined;
-      if (amount < 1) continue;
-      let type: 'debit' | 'credit' = 'debit';
-      if (typeIndicator === 'CR' || typeIndicator === 'C') {
-        type = 'credit';
-      }
-      transactions.push({
-        date: parseDate(dateStr),
-        description: description.slice(0, 200),
-        amount,
-        type,
-        balance,
-        rawText: line.trim().slice(0, 500),
-      });
-    }
-  }
-  return transactions;
-}
-
-function extractTransactionsForBank(text: string, bankName: string): Transaction[] {
-  const pattern = BANK_PATTERNS[bankName as keyof typeof BANK_PATTERNS];
-  if (!pattern) {
-    return extractTransactionsGeneric(text);
-  }
-  const transactions: Transaction[] = [];
-  const matches = [...text.matchAll(pattern.transactionPattern)];
-  for (const match of matches) {
-    const dateStr = match[1];
-    const description = match[2]?.trim() || 'Unknown';
-    const amount = parseAmount(match[3]);
-    const typeIndicator = match[4]?.toUpperCase();
-    const balance = match[5] ? parseAmount(match[5]) : undefined;
-    if (amount < 1) continue;
-    let type: 'debit' | 'credit' = 'debit';
-    if (typeIndicator === 'CR' || typeIndicator === 'C') {
-      type = 'credit';
-    }
-    transactions.push({
-      date: parseDate(dateStr),
-      description: description.slice(0, 200),
-      amount,
-      type,
-      balance,
-      rawText: match[0].slice(0, 500),
-    });
-  }
-  if (transactions.length === 0) {
-    return extractTransactionsGeneric(text);
-  }
-  return transactions;
-}
-
 async function hashFile(content: ArrayBuffer): Promise<string> {
   const hashBuffer = await crypto.subtle.digest('SHA-256', content);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Helper to update import status and return a JSON response */
+function jsonResponse(body: Record<string, unknown>, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
 }
 
 serve(async (req) => {
@@ -185,33 +47,27 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // We'll set these early so the catch block can update the import status
+  let supabaseAdmin: ReturnType<typeof createClient> | null = null;
+  let importId: string | null = null;
+
   try {
-    // Get auth token
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Authorization required' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ success: false, error: 'Authorization required' }, 401);
     }
 
-    // Create Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    supabaseAdmin = createClient(supabaseUrl, supabaseKey);
 
-    // Verify user
     const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
     
     if (userError || !user) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Invalid authentication' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ success: false, error: 'Invalid authentication' }, 401);
     }
 
-    // Input validation schema
     const requestSchema = z.object({
       importId: z.string().uuid({ message: 'Invalid import ID format' }),
       password: z.string().max(100).optional(),
@@ -221,26 +77,20 @@ serve(async (req) => {
     try {
       body = await req.json();
     } catch {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Invalid JSON body' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ success: false, error: 'Invalid JSON body' }, 400);
     }
 
     const validation = requestSchema.safeParse(body);
     if (!validation.success) {
-      console.error('Validation error:', validation.error.errors);
-      return new Response(
-        JSON.stringify({ success: false, error: 'Invalid request: ' + validation.error.errors[0]?.message }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ success: false, error: 'Invalid request: ' + validation.error.errors[0]?.message }, 400);
     }
 
-    const { importId, password } = validation.data;
+    importId = validation.data.importId;
+    const password = validation.data.password;
     console.log(`Processing import ${importId} for user ${user.id}${password ? ' (with password)' : ''}`);
 
     // Get import record
-    const { data: importRecord, error: importError } = await supabase
+    const { data: importRecord, error: importError } = await supabaseAdmin
       .from('statement_imports')
       .select('*')
       .eq('id', importId)
@@ -248,68 +98,52 @@ serve(async (req) => {
       .single();
 
     if (importError || !importRecord) {
-      console.error('Import not found:', importError);
-      return new Response(
-        JSON.stringify({ success: false, error: 'Import not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ success: false, error: 'Import not found' }, 404);
     }
 
-    // Download file from storage FIRST — before any processing
-    const { data: fileData, error: downloadError } = await supabase.storage
+    // Download file from storage
+    const { data: fileData, error: downloadError } = await supabaseAdmin.storage
       .from('bank-statements')
       .download(importRecord.file_path);
 
     if (downloadError || !fileData) {
       console.error('File download failed:', downloadError);
-      await supabase
-        .from('statement_imports')
+      await supabaseAdmin.from('statement_imports')
         .update({ status: 'failed', error_message: 'Failed to download file' })
         .eq('id', importId);
-      
-      return new Response(
-        JSON.stringify({ success: false, error: 'Failed to download file' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ success: false, error: 'Failed to download file' }, 500);
     }
 
     const fileBuffer = await fileData.arrayBuffer();
     const fileHash = await hashFile(fileBuffer);
 
-    // ── STEP 1: Password protection check BEFORE any extraction ──
+    // ── STEP 1: Password protection check ──
     const isPasswordProtected = detectPasswordProtection(fileBuffer);
     
     if (isPasswordProtected && !password) {
-      // PDF is encrypted and no password provided — halt and ask user
-      console.log('Password-protected PDF detected, halting extraction and requesting password');
-      await supabase
-        .from('statement_imports')
+      console.log('Password-protected PDF detected, requesting password');
+      await supabaseAdmin.from('statement_imports')
         .update({ 
           status: 'password_required',
           error_message: 'This bank statement is password protected. Please provide the password to continue.',
-          file_hash: fileHash 
+          file_hash: fileHash,
         })
         .eq('id', importId);
       
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Password required',
-          passwordRequired: true,
-          message: 'This bank statement is password protected. Please enter the password to continue.'
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ 
+        success: false, 
+        passwordRequired: true,
+        message: 'This bank statement is password protected. Please enter the password to continue.',
+      });
     }
 
-    // ── STEP 2: Only now set status to processing ──
-    await supabase
-      .from('statement_imports')
+    // ── STEP 2: Set status to processing ──
+    await supabaseAdmin.from('statement_imports')
       .update({ status: 'processing' })
       .eq('id', importId);
 
     // Check for duplicate by file hash
-    const { data: existingImport } = await supabase
+    const { data: existingImport } = await supabaseAdmin
       .from('statement_imports')
       .select('id, file_name, created_at')
       .eq('user_id', user.id)
@@ -318,38 +152,26 @@ serve(async (req) => {
       .single();
 
     if (existingImport && existingImport.id !== importId) {
-      await supabase
-        .from('statement_imports')
+      await supabaseAdmin.from('statement_imports')
         .update({ 
           status: 'failed', 
           error_message: `This statement was already imported on ${new Date(existingImport.created_at).toLocaleDateString()}`,
-          file_hash: fileHash 
+          file_hash: fileHash,
         })
         .eq('id', importId);
-      
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Duplicate statement detected',
-          duplicateOf: existingImport.id 
-        }),
-        { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ success: false, error: 'Duplicate statement detected' }, 409);
     }
 
-    // ── STEP 3: Send to AI for extraction ──
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    
-    const base64Data = btoa(
-      new Uint8Array(fileBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-    );
-    
-    // If password-protected and password provided, include instruction for AI
+    // ── STEP 3: Base64 encode using Deno's efficient encoder (NOT string concatenation) ──
+    const base64Data = base64Encode(new Uint8Array(fileBuffer));
+
     const passwordInstruction = (isPasswordProtected && password)
       ? `\nIMPORTANT: This PDF is password-protected. The document password is: ${password}\nUse this password to decrypt and read the document content.`
       : '';
 
-    // Use AbortController for timeout (90 seconds max for AI extraction)
+    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+
+    // ── STEP 4: AI extraction with timeout ──
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 90000);
 
@@ -366,52 +188,52 @@ serve(async (req) => {
           messages: [
             {
               role: 'system',
-              content: `You are a bank statement parser. Extract all transactions from the provided bank statement.${passwordInstruction}\n\nFor each transaction, extract:\n- date: The transaction date in YYYY-MM-DD format\n- description: The transaction description/narration (merchant name, payment reference, etc.)\n- amount: The transaction amount as a number (without currency symbols)\n- type: "debit" for money out, "credit" for money in\n- balance: The balance after transaction (if available)\n\nAlso identify:\n- bankName: The bank name (SBI, HDFC, ICICI, Axis, or Other)\n- periodStart: Statement period start date (YYYY-MM-DD)\n- periodEnd: Statement period end date (YYYY-MM-DD)\n\nReturn a JSON object with this structure:\n{\n  "bankName": "string",\n  "periodStart": "string or null",\n  "periodEnd": "string or null", \n  "transactions": [\n    {\n      "date": "YYYY-MM-DD",\n      "description": "string",\n      "amount": number,\n      "type": "debit" | "credit",\n      "balance": number or null\n    }\n  ]\n}\n\nFocus on extracting DEBIT transactions (expenses). Skip credits unless they are refunds.\nParse carefully - bank statements can have complex layouts.\nIf the document is encrypted or unreadable, return: {\"error\": \"encrypted\", \"transactions\": []}`
+              content: `You are a bank statement parser. Extract all transactions from the provided bank statement.${passwordInstruction}\n\nFor each transaction, extract:\n- date: The transaction date in YYYY-MM-DD format\n- description: The transaction description/narration\n- amount: The transaction amount as a number (without currency symbols)\n- type: "debit" for money out, "credit" for money in\n- balance: The balance after transaction (if available)\n\nAlso identify:\n- bankName: The bank name (SBI, HDFC, ICICI, Axis, or Other)\n- periodStart: Statement period start date (YYYY-MM-DD)\n- periodEnd: Statement period end date (YYYY-MM-DD)\n\nReturn ONLY a JSON object (no markdown, no code fences) with this structure:\n{\n  "bankName": "string",\n  "periodStart": "string or null",\n  "periodEnd": "string or null",\n  "transactions": [\n    {\n      "date": "YYYY-MM-DD",\n      "description": "string",\n      "amount": number,\n      "type": "debit" | "credit",\n      "balance": number or null\n    }\n  ]\n}\n\nFocus on extracting DEBIT transactions (expenses). Include credits only if they are refunds.\nIf the document is encrypted or unreadable, return: {"error": "encrypted", "transactions": []}\nIf no transactions found, return: {"error": "no_transactions", "transactions": []}`
             },
             {
               role: 'user',
               content: [
                 {
                   type: 'text',
-                  text: 'Please extract all transactions from this bank statement PDF. Focus on debit/expense transactions.'
+                  text: 'Extract all transactions from this bank statement PDF. Focus on debit/expense transactions.',
                 },
                 {
                   type: 'image_url',
                   image_url: {
-                    url: `data:application/pdf;base64,${base64Data}`
-                  }
-                }
-              ]
-            }
+                    url: `data:application/pdf;base64,${base64Data}`,
+                  },
+                },
+              ],
+            },
           ],
           temperature: 0.1,
           max_tokens: 8000,
         }),
         signal: controller.signal,
       });
-    } catch (abortError) {
+    } catch (fetchError) {
       clearTimeout(timeoutId);
-      console.error('AI request timed out or aborted:', abortError);
+      console.error('AI request failed:', fetchError);
       
-      const timeoutMessage = isPasswordProtected && password
-        ? 'Processing timed out. The password may be incorrect or the file is too large. Please try again.'
-        : 'Processing timed out. Please try again with a smaller file.';
-      const timeoutStatus = isPasswordProtected && password ? 'password_required' : 'failed';
-      
-      await supabase
-        .from('statement_imports')
-        .update({ status: timeoutStatus, error_message: timeoutMessage })
+      const isTimeout = fetchError instanceof DOMException && fetchError.name === 'AbortError';
+      const errMsg = isPasswordProtected && password
+        ? 'Processing timed out. The password may be incorrect or the file is too large.'
+        : isTimeout
+          ? 'Processing timed out. Please try again with a smaller file.'
+          : 'Failed to connect to AI service. Please try again.';
+
+      // If password was provided and it timed out, go back to password_required
+      const newStatus = (isPasswordProtected && password) ? 'password_required' : 'failed';
+      await supabaseAdmin.from('statement_imports')
+        .update({ status: newStatus, error_message: errMsg })
         .eq('id', importId);
-      
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: timeoutMessage,
-          passwordRequired: isPasswordProtected && !!password,
-          message: timeoutMessage,
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+
+      return jsonResponse({ 
+        success: false, 
+        error: errMsg,
+        passwordRequired: newStatus === 'password_required',
+        message: errMsg,
+      });
     } finally {
       clearTimeout(timeoutId);
     }
@@ -421,166 +243,92 @@ serve(async (req) => {
       console.error('AI parsing failed:', aiResponse.status, errorText);
       
       if (isPasswordProtected && password) {
-        await supabase
-          .from('statement_imports')
-          .update({ 
-            status: 'password_required', 
-            error_message: 'Incorrect password. Please try again.' 
-          })
+        await supabaseAdmin.from('statement_imports')
+          .update({ status: 'password_required', error_message: 'Failed to read PDF. The password may be incorrect.' })
           .eq('id', importId);
-        
-        return new Response(
-          JSON.stringify({ 
-            success: false, 
-            error: 'Incorrect password',
-            passwordRequired: true,
-            message: 'Incorrect password. Please try again.'
-          }),
-          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        return jsonResponse({ success: false, passwordRequired: true, message: 'Failed to read PDF. The password may be incorrect.' });
       }
       
-      await supabase
-        .from('statement_imports')
+      await supabaseAdmin.from('statement_imports')
         .update({ status: 'failed', error_message: 'Failed to parse PDF. Please ensure it is a valid bank statement.' })
         .eq('id', importId);
-      
-      return new Response(
-        JSON.stringify({ success: false, error: 'Failed to parse PDF' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ success: false, error: 'Failed to parse PDF' }, 500);
     }
 
     const aiResult = await aiResponse.json();
     const content = aiResult.choices?.[0]?.message?.content;
     
-    console.log('AI response:', content?.slice(0, 500));
-
-    // Parse the JSON from AI response
-    let parsedData;
-    try {
-      const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, content];
-      parsedData = JSON.parse(jsonMatch[1].trim());
-    } catch (e) {
-      console.error('Failed to parse AI response as JSON:', e);
-      
-      // If password-protected, the AI likely couldn't read it — ask for password retry
-      if (isPasswordProtected && password) {
-        await supabase
-          .from('statement_imports')
-          .update({ 
-            status: 'password_required', 
-            error_message: 'The password may be incorrect, or the PDF format is not supported. Please try again.' 
-          })
-          .eq('id', importId);
-        
-        return new Response(
-          JSON.stringify({ 
-            success: false, 
-            error: 'Incorrect password',
-            passwordRequired: true,
-            message: 'Could not extract data. The password may be incorrect. Please try again.'
-          }),
-          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      
-      await supabase
-        .from('statement_imports')
-        .update({ status: 'failed', error_message: 'Failed to extract transactions from statement' })
+    if (!content) {
+      console.error('AI returned empty content');
+      await supabaseAdmin.from('statement_imports')
+        .update({ status: 'failed', error_message: 'AI returned no content. Please try again.' })
         .eq('id', importId);
-      
-      return new Response(
-        JSON.stringify({ success: false, error: 'Failed to extract transactions' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ success: false, error: 'AI returned no content' }, 500);
     }
 
-    // Check if AI explicitly reported the document as encrypted/unreadable
-    if (parsedData.error === 'encrypted') {
-      console.log('AI reported document as encrypted');
-      await supabase
-        .from('statement_imports')
-        .update({ 
-          status: 'password_required', 
-          error_message: password 
-            ? 'The password appears to be incorrect. Please try again.'
-            : 'This document is encrypted. Please provide the password.',
-          file_hash: fileHash 
-        })
-        .eq('id', importId);
+    console.log('AI response preview:', content.slice(0, 300));
+
+    // Parse AI JSON response
+    let parsedData;
+    try {
+      // Strip markdown code fences if present
+      const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+      const jsonStr = jsonMatch ? jsonMatch[1].trim() : content.trim();
+      parsedData = JSON.parse(jsonStr);
+    } catch (e) {
+      console.error('Failed to parse AI response:', e, 'Content:', content.slice(0, 500));
       
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Password required',
-          passwordRequired: true,
-          message: password 
-            ? 'The password appears to be incorrect. Please try again.'
-            : 'This document is encrypted. Please provide the password.'
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      if (isPasswordProtected && password) {
+        await supabaseAdmin.from('statement_imports')
+          .update({ status: 'password_required', error_message: 'Could not read PDF content. The password may be incorrect.' })
+          .eq('id', importId);
+        return jsonResponse({ success: false, passwordRequired: true, message: 'Could not read PDF content. The password may be incorrect.' });
+      }
+      
+      await supabaseAdmin.from('statement_imports')
+        .update({ status: 'failed', error_message: 'Failed to extract transactions from statement.' })
+        .eq('id', importId);
+      return jsonResponse({ success: false, error: 'Failed to extract transactions' }, 500);
+    }
+
+    // Check if AI reported encrypted
+    if (parsedData.error === 'encrypted') {
+      const msg = password
+        ? 'The password appears to be incorrect. Please try again.'
+        : 'This document is encrypted. Please provide the password.';
+      await supabaseAdmin.from('statement_imports')
+        .update({ status: 'password_required', error_message: msg, file_hash: fileHash })
+        .eq('id', importId);
+      return jsonResponse({ success: false, passwordRequired: true, message: msg });
     }
 
     const { bankName, periodStart, periodEnd, transactions = [] } = parsedData;
-
-    // Filter to only debit transactions (expenses)
     const debitTransactions = transactions.filter((t: any) => t.type === 'debit' && t.amount > 0);
 
     if (debitTransactions.length === 0) {
-      // If password was provided but no transactions found, it may be a wrong password
       if (isPasswordProtected && password) {
-        await supabase
-          .from('statement_imports')
-          .update({ 
-            status: 'password_required', 
-            error_message: 'No transactions found. The password may be incorrect. Please try again.',
-            file_hash: fileHash,
-            bank_name: bankName
-          })
+        await supabaseAdmin.from('statement_imports')
+          .update({ status: 'password_required', error_message: 'No transactions found. The password may be incorrect.', file_hash: fileHash, bank_name: bankName })
           .eq('id', importId);
-        
-        return new Response(
-          JSON.stringify({ 
-            success: false, 
-            error: 'No transactions found — password may be incorrect',
-            passwordRequired: true,
-            message: 'No transactions could be extracted. Please verify the password and try again.'
-          }),
-          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        return jsonResponse({ success: false, passwordRequired: true, message: 'No transactions could be extracted. Please verify the password.' });
       }
 
-      await supabase
-        .from('statement_imports')
-        .update({ 
-          status: 'failed', 
-          error_message: 'No expense transactions found in the statement',
-          file_hash: fileHash,
-          bank_name: bankName
-        })
+      await supabaseAdmin.from('statement_imports')
+        .update({ status: 'failed', error_message: 'No expense transactions found in the statement.', file_hash: fileHash, bank_name: bankName })
         .eq('id', importId);
-      
-      return new Response(
-        JSON.stringify({ success: false, error: 'No expense transactions found' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ success: false, error: 'No expense transactions found' }, 400);
     }
 
-    // Check for duplicate transactions against existing expenses
-    const { data: existingExpenses } = await supabase
+    // Check for duplicate transactions
+    const { data: existingExpenses } = await supabaseAdmin
       .from('expenses')
       .select('id, date, amount, note')
       .eq('user_id', user.id);
 
-    // Insert extracted transactions
     const extractedTransactions = debitTransactions.map((t: any) => {
       const possibleDuplicate = existingExpenses?.find(e => 
-        e.date === t.date && 
-        Math.abs(Number(e.amount) - t.amount) < 0.01
+        e.date === t.date && Math.abs(Number(e.amount) - t.amount) < 0.01
       );
-
       return {
         import_id: importId,
         user_id: user.id,
@@ -596,26 +344,20 @@ serve(async (req) => {
       };
     });
 
-    const { error: insertError } = await supabase
+    const { error: insertError } = await supabaseAdmin
       .from('extracted_transactions')
       .insert(extractedTransactions);
 
     if (insertError) {
       console.error('Failed to insert transactions:', insertError);
-      await supabase
-        .from('statement_imports')
-        .update({ status: 'failed', error_message: 'Failed to save extracted transactions' })
+      await supabaseAdmin.from('statement_imports')
+        .update({ status: 'failed', error_message: 'Failed to save extracted transactions.' })
         .eq('id', importId);
-      
-      return new Response(
-        JSON.stringify({ success: false, error: 'Failed to save transactions' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ success: false, error: 'Failed to save transactions' }, 500);
     }
 
-    // Update import record — extraction successful
-    await supabase
-      .from('statement_imports')
+    // Success
+    await supabaseAdmin.from('statement_imports')
       .update({
         status: 'extracted',
         bank_name: bankName,
@@ -626,26 +368,30 @@ serve(async (req) => {
       })
       .eq('id', importId);
 
-    // Password is NOT stored or logged — it was only used in the AI prompt above
-    // and goes out of scope here.
     console.log(`Extracted ${debitTransactions.length} transactions from ${bankName} statement`);
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        bankName,
-        transactionCount: debitTransactions.length,
-        periodStart,
-        periodEnd,
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    return jsonResponse({
+      success: true,
+      bankName,
+      transactionCount: debitTransactions.length,
+      periodStart,
+      periodEnd,
+    });
 
   } catch (error) {
-    console.error('Parse error:', error);
-    return new Response(
-      JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    console.error('Unhandled parse error:', error);
+    
+    // CRITICAL: Update import status so frontend doesn't stay stuck
+    if (supabaseAdmin && importId) {
+      try {
+        await supabaseAdmin.from('statement_imports')
+          .update({ status: 'failed', error_message: 'An unexpected error occurred. Please try again.' })
+          .eq('id', importId);
+      } catch (updateErr) {
+        console.error('Failed to update import status after error:', updateErr);
+      }
+    }
+
+    return jsonResponse({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }, 500);
   }
 });

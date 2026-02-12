@@ -79,14 +79,16 @@ export default function Profile() {
 
       if (uploadError) throw uploadError;
 
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
+      // Get signed URL (bucket is private)
+      const { data: signedUrlData, error: signedUrlError } = await supabase.storage
         .from('avatars')
-        .getPublicUrl(fileName);
+        .createSignedUrl(fileName, 60 * 60 * 24 * 365); // 1 year
 
-      // Update profile with avatar URL (add cache buster)
+      if (signedUrlError || !signedUrlData?.signedUrl) throw signedUrlError || new Error('Failed to get signed URL');
+
+      // Update profile with signed avatar URL
       await updateProfile.mutateAsync({ 
-        avatar_url: `${publicUrl}?t=${Date.now()}` 
+        avatar_url: signedUrlData.signedUrl 
       });
 
       toast.success('Avatar updated!');

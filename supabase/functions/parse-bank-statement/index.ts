@@ -156,7 +156,7 @@ serve(async (req) => {
       .eq('user_id', user.id)
       .eq('file_hash', fileHash)
       .eq('status', 'completed')
-      .single();
+      .maybeSingle();
 
     if (existingImport && existingImport.id !== importId) {
       await updateStatus(supabase, importId, 'failed', {

@@ -119,20 +119,30 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
   }, []);
 
   // ── POLL-DRIVEN STATE MACHINE ──
+  // Use a ref to avoid stale closure issues with wizardState
+  const wizardStateRef = useRef(wizardState);
+  wizardStateRef.current = wizardState;
+
   useEffect(() => {
     if (!importRecord) return;
     const s = importRecord.status;
+    const currentState = wizardStateRef.current;
 
-    if (s === 'processing' && (wizardState === 'checking_encryption' || wizardState === 'validating_password' || wizardState === 'extracting')) {
+    // Don't process if we're idle or uploading (not yet submitted to backend)
+    if (currentState === 'idle' || currentState === 'uploading') return;
+
+    if (s === 'processing' && (currentState === 'checking_encryption' || currentState === 'validating_password' || currentState === 'extracting')) {
       setWizardState('extracting');
       setStatusText('Extracting transactions with AI...');
-    } else if (s === 'password_required') {
+    } else if (s === 'password_required' && currentState !== 'waiting_password') {
       clearTimeout_();
-      if (wizardState === 'validating_password') {
+      if (currentState === 'validating_password') {
         setPasswordError(importRecord.error_message || 'Incorrect password. Please try again.');
       }
       setWizardState('waiting_password');
       setStatusText('');
+    } else if (s === 'password_required' && currentState === 'waiting_password') {
+      // Already waiting, just update error if changed
     } else if (s === 'extracted') {
       clearTimeout_();
       setErrorMessage(null);

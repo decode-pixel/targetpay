@@ -1,32 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  Upload, 
-  FileText, 
-  Loader2, 
-  CheckCircle2, 
-  XCircle, 
-  ChevronRight,
-  Sparkles,
-  Calendar,
-  Lock
+  Upload, FileText, Loader2, CheckCircle2, XCircle, ChevronRight, Sparkles, Calendar
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerHeader,
-  DrawerTitle,
+  Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle,
 } from '@/components/ui/drawer';
 import StatementUploader from './StatementUploader';
 import TransactionPreview from './TransactionPreview';
@@ -36,14 +20,9 @@ import SuggestedCategories from '@/components/categories/SuggestedCategories';
 import { ImportWizardStep, ExtractedTransaction } from '@/types/import';
 import { useCategories } from '@/hooks/useCategories';
 import {
-  useUploadStatement,
-  useParseStatement,
-  useCategorizeTransactions,
-  useImportTransactions,
-  useStatementImport,
-  useExtractedTransactions,
-  useUpdateExtractedTransaction,
-  useDeleteImport,
+  useUploadStatement, useParseStatement, useCategorizeTransactions,
+  useImportTransactions, useStatementImport, useExtractedTransactions,
+  useUpdateExtractedTransaction, useDeleteImport,
 } from '@/hooks/useStatementImport';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -53,6 +32,31 @@ interface ImportWizardDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+type WizardState = 
+  | 'idle'
+  | 'uploading'
+  | 'checking_encryption'
+  | 'waiting_password'
+  | 'validating_password'
+  | 'extracting'
+  | 'preview_ready'
+  | 'categorizing'
+  | 'confirm_ready'
+  | 'error';
+
+const STEP_MAP: Record<WizardState, ImportWizardStep> = {
+  idle: 'upload',
+  uploading: 'upload',
+  checking_encryption: 'processing',
+  waiting_password: 'password_required',
+  validating_password: 'processing',
+  extracting: 'processing',
+  preview_ready: 'preview',
+  categorizing: 'categorize',
+  confirm_ready: 'confirm',
+  error: 'processing',
+};
+
 const STEPS: { key: ImportWizardStep; label: string; icon: React.ReactNode }[] = [
   { key: 'upload', label: 'Upload', icon: <Upload className="h-4 w-4" /> },
   { key: 'processing', label: 'Extract', icon: <Loader2 className="h-4 w-4" /> },
@@ -61,26 +65,24 @@ const STEPS: { key: ImportWizardStep; label: string; icon: React.ReactNode }[] =
   { key: 'confirm', label: 'Confirm', icon: <Calendar className="h-4 w-4" /> },
 ];
 
-// Max time to wait for backend before showing timeout error
-const PROCESSING_TIMEOUT_MS = 120_000; // 2 minutes
+const TIMEOUT_MS = 90_000;
 
 export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardDialogProps) {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const [step, setStep] = useState<ImportWizardStep>('upload');
+  
+  const [wizardState, setWizardState] = useState<WizardState>('idle');
   const [importId, setImportId] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [localTransactions, setLocalTransactions] = useState<ExtractedTransaction[]>([]);
   const [suggestedCategories, setSuggestedCategories] = useState<{ name: string; icon: string; color: string }[]>([]);
   const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [processingStatus, setProcessingStatus] = useState<string>('');
-  const [isSubmittingPassword, setIsSubmittingPassword] = useState(false);
-  const [processingError, setProcessingError] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [statusText, setStatusText] = useState('');
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const processingStartRef = useRef<number | null>(null);
 
   const { data: categories = [] } = useCategories();
-  const { data: importRecord, refetch: refetchImport } = useStatementImport(importId);
+  const { data: importRecord } = useStatementImport(importId);
   const { data: extractedTransactions = [], refetch: refetchTransactions } = useExtractedTransactions(importId);
   
   const uploadMutation = useUploadStatement();
@@ -90,281 +92,203 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
   const updateTransaction = useUpdateExtractedTransaction();
   const deleteImport = useDeleteImport();
 
-  // Cleanup timeout on unmount
+  const step = STEP_MAP[wizardState];
+
+  // Cleanup
   useEffect(() => {
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    };
+    return () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); };
   }, []);
 
-  // Sync local transactions with fetched data
+  // Sync extracted transactions
   useEffect(() => {
-    if (extractedTransactions.length > 0) {
-      setLocalTransactions(extractedTransactions);
-    }
+    if (extractedTransactions.length > 0) setLocalTransactions(extractedTransactions);
   }, [extractedTransactions]);
 
-  // Start a processing timeout - if backend doesn't respond within limit, show error
-  const startProcessingTimeout = useCallback(() => {
+  // Timeout helper
+  const startTimeout = useCallback((msg: string) => {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    processingStartRef.current = Date.now();
     timeoutRef.current = setTimeout(() => {
-      setProcessingError('Processing timed out. Please try again.');
-      setProcessingStatus('');
-      setIsSubmittingPassword(false);
-      setStep('processing'); // Show error in processing view
-    }, PROCESSING_TIMEOUT_MS);
+      setErrorMessage(msg);
+      setWizardState('error');
+      setStatusText('');
+    }, TIMEOUT_MS);
   }, []);
 
-  const clearProcessingTimeout = useCallback(() => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-    processingStartRef.current = null;
+  const clearTimeout_ = useCallback(() => {
+    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
   }, []);
 
-  // Watch import status from polling and advance steps
+  // ── POLL-DRIVEN STATE MACHINE ──
   useEffect(() => {
     if (!importRecord) return;
+    const s = importRecord.status;
 
-    switch (importRecord.status) {
-      case 'pending':
-        setStep('processing');
-        setProcessingStatus('Checking password protection...');
-        break;
-      case 'processing':
-        setStep('processing');
-        setProcessingStatus('Extracting transactions...');
-        setProcessingError(null);
-        break;
-      case 'password_required':
-        clearProcessingTimeout();
-        setStep('password_required');
-        setProcessingStatus('');
-        // If we were submitting a password and got back to password_required, it was wrong
-        if (isSubmittingPassword) {
-          setPasswordError(importRecord.error_message || 'Incorrect password. Please try again.');
-          setIsSubmittingPassword(false);
-        }
-        break;
-      case 'extracted':
-        clearProcessingTimeout();
-        setProcessingError(null);
-        setStep('preview');
-        refetchTransactions();
-        break;
-      case 'categorizing':
-        setStep('categorize');
-        break;
-      case 'ready':
-        clearProcessingTimeout();
-        setStep('confirm');
-        refetchTransactions();
-        break;
-      case 'failed':
-        clearProcessingTimeout();
-        setProcessingError(importRecord.error_message || 'Failed to process statement.');
-        setProcessingStatus('');
-        setIsSubmittingPassword(false);
-        setStep('processing');
-        break;
+    if (s === 'processing' && (wizardState === 'checking_encryption' || wizardState === 'validating_password' || wizardState === 'extracting')) {
+      setWizardState('extracting');
+      setStatusText('Extracting transactions with AI...');
+    } else if (s === 'password_required') {
+      clearTimeout_();
+      if (wizardState === 'validating_password') {
+        setPasswordError(importRecord.error_message || 'Incorrect password. Please try again.');
+      }
+      setWizardState('waiting_password');
+      setStatusText('');
+    } else if (s === 'extracted') {
+      clearTimeout_();
+      setErrorMessage(null);
+      setWizardState('preview_ready');
+      refetchTransactions();
+    } else if (s === 'categorizing') {
+      setWizardState('categorizing');
+    } else if (s === 'ready') {
+      clearTimeout_();
+      setWizardState('confirm_ready');
+      refetchTransactions();
+    } else if (s === 'failed') {
+      clearTimeout_();
+      setErrorMessage(importRecord.error_message || 'Processing failed.');
+      setWizardState('error');
+      setStatusText('');
     }
-  }, [importRecord?.status, importRecord?.error_message, importRecord?.updated_at, refetchTransactions, clearProcessingTimeout, isSubmittingPassword]);
+  }, [importRecord?.status, importRecord?.updated_at, importRecord?.error_message, refetchTransactions, clearTimeout_]);
 
+  // ── HANDLERS ──
   const handleUpload = async (file: File) => {
     setUploadProgress(0);
-    setProcessingError(null);
-    setProcessingStatus('Uploading statement...');
-    
-    const progressInterval = setInterval(() => {
-      setUploadProgress(prev => Math.min(prev + 10, 90));
-    }, 200);
+    setErrorMessage(null);
+    setWizardState('uploading');
+    setStatusText('Uploading...');
+
+    const interval = setInterval(() => setUploadProgress(p => Math.min(p + 10, 90)), 200);
 
     try {
       const result = await uploadMutation.mutateAsync(file);
       setImportId(result.id);
       setUploadProgress(100);
-      setStep('processing');
-      setProcessingStatus('Checking password protection...');
+      setWizardState('checking_encryption');
+      setStatusText('Checking for encryption...');
+      startTimeout('Processing timed out. Please try again.');
 
-      // Start timeout protection
-      startProcessingTimeout();
-
-      // Fire-and-forget: don't await the parse call
-      // Polling will detect status changes (password_required, extracted, failed)
-      parseMutation.mutate(
-        { importId: result.id },
-        {
-          onSuccess: (parseResult) => {
-            if (parseResult.passwordRequired) {
-              clearProcessingTimeout();
-              setStep('password_required');
-              setProcessingStatus('');
-            }
-            // Other states handled by polling
-          },
-          onError: (error) => {
-            clearProcessingTimeout();
-            setProcessingError(error instanceof Error ? error.message : 'Failed to process statement.');
-            setProcessingStatus('');
-          },
-        }
-      );
-    } catch (error) {
-      setProcessingError(error instanceof Error ? error.message : 'Upload failed.');
-      setProcessingStatus('');
-    } finally {
-      clearInterval(progressInterval);
-    }
-  };
-  
-  const handlePasswordSubmit = async (password: string) => {
-    if (!importId || isSubmittingPassword) return;
-    setPasswordError(null);
-    setIsSubmittingPassword(true);
-    setProcessingStatus('Unlocking PDF...');
-
-    // Start timeout for password validation
-    startProcessingTimeout();
-
-    // Fire-and-forget: don't await
-    parseMutation.mutate(
-      { importId, password },
-      {
-        onSuccess: (result) => {
-          if (result.passwordRequired) {
-            // Wrong password - stay on password screen
-            clearProcessingTimeout();
-            setPasswordError(result.message || 'Incorrect password. Please try again.');
-            setProcessingStatus('');
-            setIsSubmittingPassword(false);
-            refetchImport();
-          } else {
-            // Correct password - move to processing, polling will advance to preview
-            setStep('processing');
-            setProcessingStatus('Extracting transactions...');
-            // isSubmittingPassword stays true until polling detects extracted/failed
+      // Fire parse — polling handles state transitions
+      parseMutation.mutate({ importId: result.id }, {
+        onSuccess: (res) => {
+          if (res.passwordRequired) {
+            clearTimeout_();
+            setWizardState('waiting_password');
+            setStatusText('');
           }
         },
-        onError: (error) => {
-          clearProcessingTimeout();
-          setPasswordError(error instanceof Error ? error.message : 'Something went wrong. Please try again.');
-          setProcessingStatus('');
-          setIsSubmittingPassword(false);
+        onError: (err) => {
+          clearTimeout_();
+          setErrorMessage(err instanceof Error ? err.message : 'Processing failed.');
+          setWizardState('error');
         },
-      }
-    );
+      });
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Upload failed.');
+      setWizardState('error');
+    } finally {
+      clearInterval(interval);
+    }
+  };
+
+  const handlePasswordSubmit = async (password: string) => {
+    if (!importId || wizardState === 'validating_password') return;
+    setPasswordError(null);
+    setWizardState('validating_password');
+    setStatusText('Unlocking and extracting...');
+    startTimeout('Processing timed out. The password may be incorrect.');
+
+    parseMutation.mutate({ importId, password }, {
+      onSuccess: (res) => {
+        if (res.passwordRequired) {
+          clearTimeout_();
+          setPasswordError(res.message || 'Incorrect password. Please try again.');
+          setWizardState('waiting_password');
+          setStatusText('');
+        }
+        // else polling will transition to extracting → preview_ready
+      },
+      onError: (err) => {
+        clearTimeout_();
+        setPasswordError(err instanceof Error ? err.message : 'Failed. Please try again.');
+        setWizardState('waiting_password');
+        setStatusText('');
+      },
+    });
   };
 
   const handleCancelPassword = async () => {
-    clearProcessingTimeout();
-    setIsSubmittingPassword(false);
-    setPasswordError(null);
-    setProcessingStatus('');
-    await handleCancel();
+    clearTimeout_();
+    if (importId) await deleteImport.mutateAsync(importId).catch(() => {});
+    resetWizard();
+    onOpenChange(false);
   };
 
   const handleCategorize = async () => {
     if (!importId) return;
-    setStep('categorize');
-    const result = await categorizeMutation.mutateAsync(importId);
-    if (result.suggestedCategories && result.suggestedCategories.length > 0) {
-      setSuggestedCategories(result.suggestedCategories);
+    setWizardState('categorizing');
+    try {
+      const result = await categorizeMutation.mutateAsync(importId);
+      if (result.suggestedCategories?.length) setSuggestedCategories(result.suggestedCategories);
+    } catch {
+      // Categorization failure is non-blocking — user can still proceed
+      setWizardState('confirm_ready');
     }
   };
 
   const handleImport = async () => {
     if (!importId) return;
-
-    const transactionUpdates = localTransactions
-      .filter(t => t.is_selected)
-      .map(t => ({
-        id: t.id,
-        category_id: t.suggested_category_id,
-      }));
-
-    await importMutation.mutateAsync({ 
-      importId, 
-      transactions: transactionUpdates 
-    });
-
+    const updates = localTransactions.filter(t => t.is_selected).map(t => ({
+      id: t.id,
+      category_id: t.suggested_category_id,
+    }));
+    await importMutation.mutateAsync({ importId, transactions: updates });
     onOpenChange(false);
     navigate('/expenses');
   };
 
   const handleCancel = async () => {
-    clearProcessingTimeout();
-    if (importId) {
-      await deleteImport.mutateAsync(importId);
-    }
+    clearTimeout_();
+    if (importId) await deleteImport.mutateAsync(importId).catch(() => {});
     resetWizard();
     onOpenChange(false);
   };
 
   const handleRetry = () => {
-    clearProcessingTimeout();
-    setProcessingError(null);
-    setProcessingStatus('');
-    setIsSubmittingPassword(false);
-    setPasswordError(null);
-    if (importId) {
-      deleteImport.mutate(importId);
-    }
-    setImportId(null);
-    setStep('upload');
+    clearTimeout_();
+    if (importId) deleteImport.mutate(importId);
+    resetWizard();
   };
 
   const resetWizard = () => {
-    clearProcessingTimeout();
-    setStep('upload');
+    clearTimeout_();
+    setWizardState('idle');
     setImportId(null);
     setUploadProgress(0);
     setLocalTransactions([]);
     setSuggestedCategories([]);
     setPasswordError(null);
-    setProcessingStatus('');
-    setIsSubmittingPassword(false);
-    setProcessingError(null);
+    setErrorMessage(null);
+    setStatusText('');
   };
 
   const handleTransactionUpdate = useCallback((id: string, updates: Partial<ExtractedTransaction>) => {
-    setLocalTransactions(prev => 
-      prev.map(t => t.id === id ? { ...t, ...updates } : t)
-    );
+    setLocalTransactions(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
     updateTransaction.mutate({ id, ...updates } as any);
   }, [updateTransaction]);
 
   const handleSelectionChange = useCallback((id: string, selected: boolean) => {
-    setLocalTransactions(prev =>
-      prev.map(t => t.id === id ? { ...t, is_selected: selected } : t)
-    );
+    setLocalTransactions(prev => prev.map(t => t.id === id ? { ...t, is_selected: selected } : t));
     updateTransaction.mutate({ id, is_selected: selected } as any);
   }, [updateTransaction]);
 
   const handleSelectAll = useCallback((selected: boolean) => {
-    setLocalTransactions(prev =>
-      prev.map(t => ({ ...t, is_selected: selected }))
-    );
-    localTransactions.forEach(t => {
-      updateTransaction.mutate({ id: t.id, is_selected: selected } as any);
-    });
+    setLocalTransactions(prev => prev.map(t => ({ ...t, is_selected: selected })));
+    localTransactions.forEach(t => updateTransaction.mutate({ id: t.id, is_selected: selected } as any));
   }, [localTransactions, updateTransaction]);
 
   const selectedCount = localTransactions.filter(t => t.is_selected).length;
-  const totalAmount = localTransactions
-    .filter(t => t.is_selected)
-    .reduce((sum, t) => sum + Number(t.amount), 0);
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
-  };
-
   const currentStepIndex = STEPS.findIndex(s => s.key === step);
 
   const content = (
@@ -372,73 +296,57 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
       {/* Progress steps */}
       <div className="flex items-center justify-between px-2 md:px-4 py-2 bg-muted/30 rounded-lg mb-4 overflow-x-auto">
         {STEPS.map((s, index) => (
-          <div 
-            key={s.key}
-            className={cn(
-              'flex items-center gap-1 md:gap-2 shrink-0',
-              index <= currentStepIndex ? 'text-primary' : 'text-muted-foreground'
-            )}
-          >
+          <div key={s.key} className={cn(
+            'flex items-center gap-1 md:gap-2 shrink-0',
+            index <= currentStepIndex ? 'text-primary' : 'text-muted-foreground'
+          )}>
             <div className={cn(
               'w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-xs md:text-sm font-medium',
               index < currentStepIndex && 'bg-primary text-primary-foreground',
               index === currentStepIndex && 'bg-primary/20 text-primary border-2 border-primary',
               index > currentStepIndex && 'bg-muted'
             )}>
-              {index < currentStepIndex ? (
-                <CheckCircle2 className="h-4 w-4" />
-              ) : (
-                s.icon
-              )}
+              {index < currentStepIndex ? <CheckCircle2 className="h-4 w-4" /> : s.icon}
             </div>
             <span className="text-xs md:text-sm font-medium hidden sm:inline">{s.label}</span>
-            {index < STEPS.length - 1 && (
-              <ChevronRight className="h-3 w-3 md:h-4 md:w-4 text-muted-foreground mx-1" />
-            )}
+            {index < STEPS.length - 1 && <ChevronRight className="h-3 w-3 md:h-4 md:w-4 text-muted-foreground mx-1" />}
           </div>
         ))}
       </div>
 
-      {/* Content */}
       <div className="flex-1 overflow-y-auto">
+        {/* UPLOAD */}
         {step === 'upload' && (
           <StatementUploader
             onUpload={handleUpload}
-            isUploading={uploadMutation.isPending}
+            isUploading={wizardState === 'uploading'}
             uploadProgress={uploadProgress}
           />
         )}
 
+        {/* PROCESSING / ERROR */}
         {step === 'processing' && (
           <div className="text-center py-8 md:py-12 space-y-4 md:space-y-6">
-            {(processingError || importRecord?.status === 'failed') ? (
+            {wizardState === 'error' ? (
               <>
                 <XCircle className="h-12 w-12 md:h-16 md:w-16 mx-auto text-destructive" />
                 <Alert variant="destructive" className="max-w-md mx-auto">
                   <XCircle className="h-4 w-4" />
                   <AlertTitle>Processing Failed</AlertTitle>
-                  <AlertDescription>
-                    {processingError || importRecord?.error_message || 'Failed to extract transactions from the statement'}
-                  </AlertDescription>
+                  <AlertDescription>{errorMessage || 'An error occurred.'}</AlertDescription>
                 </Alert>
-                <Button variant="outline" onClick={handleRetry}>
-                  Try Again
-                </Button>
+                <Button variant="outline" onClick={handleRetry}>Try Again</Button>
               </>
             ) : (
               <>
                 <Loader2 className="h-12 w-12 md:h-16 md:w-16 mx-auto text-primary animate-spin" />
                 <div className="space-y-2">
-                  <h3 className="text-base md:text-lg font-semibold">
-                    {processingStatus || 'Processing...'}
-                  </h3>
+                  <h3 className="text-base md:text-lg font-semibold">{statusText || 'Processing...'}</h3>
                   <p className="text-sm text-muted-foreground px-4">
-                    Using AI to read and extract transactions from your statement
+                    AI is reading and extracting transactions from your statement
                   </p>
                   {importRecord?.bank_name && (
-                    <p className="text-sm text-primary">
-                      Detected: {importRecord.bank_name} Bank Statement
-                    </p>
+                    <p className="text-sm text-primary">Detected: {importRecord.bank_name} Bank Statement</p>
                   )}
                 </div>
               </>
@@ -446,16 +354,18 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
           </div>
         )}
 
+        {/* PASSWORD */}
         {step === 'password_required' && importRecord && (
           <PasswordInputDialog
             fileName={importRecord.file_name}
             onSubmit={handlePasswordSubmit}
             onCancel={handleCancelPassword}
-            isProcessing={isSubmittingPassword}
+            isProcessing={wizardState === 'validating_password'}
             error={passwordError}
           />
         )}
 
+        {/* PREVIEW */}
         {step === 'preview' && (
           <div className="space-y-4">
             {importRecord && (
@@ -471,7 +381,6 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
                 </div>
               </div>
             )}
-
             <TransactionPreview
               transactions={localTransactions}
               categories={categories}
@@ -483,21 +392,19 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
           </div>
         )}
 
+        {/* CATEGORIZE */}
         {step === 'categorize' && (
           <div className="text-center py-8 md:py-12 space-y-4 md:space-y-6">
-            <div className="relative">
-              <Sparkles className="h-12 w-12 md:h-16 md:w-16 mx-auto text-primary animate-pulse" />
-            </div>
+            <Sparkles className="h-12 w-12 md:h-16 md:w-16 mx-auto text-primary animate-pulse" />
             <div className="space-y-2">
               <h3 className="text-base md:text-lg font-semibold">AI Categorization in Progress</h3>
-              <p className="text-sm text-muted-foreground px-4">
-                Analyzing transactions and assigning categories
-              </p>
+              <p className="text-sm text-muted-foreground px-4">Analyzing transactions and assigning categories</p>
             </div>
             <Progress value={categorizeMutation.isPending ? 60 : 100} className="w-48 mx-auto" />
           </div>
         )}
 
+        {/* CONFIRM */}
         {step === 'confirm' && (
           <div className="space-y-4">
             {suggestedCategories.length > 0 && (
@@ -506,7 +413,6 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
                 onDismiss={() => setSuggestedCategories([])}
               />
             )}
-
             <MonthGroupedPreview
               transactions={localTransactions.filter(t => t.is_selected)}
               onConfirm={handleImport}
@@ -517,20 +423,13 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
         )}
       </div>
 
-      {/* Footer actions */}
+      {/* Footer */}
       {step !== 'confirm' && (
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t mt-4">
-          <Button variant="ghost" onClick={handleCancel} className="order-2 sm:order-1">
-            Cancel
-          </Button>
-
+          <Button variant="ghost" onClick={handleCancel} className="order-2 sm:order-1">Cancel</Button>
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 order-1 sm:order-2">
             {step === 'preview' && (
-              <Button 
-                onClick={handleCategorize} 
-                disabled={categorizeMutation.isPending}
-                className="w-full sm:w-auto"
-              >
+              <Button onClick={handleCategorize} disabled={categorizeMutation.isPending} className="w-full sm:w-auto">
                 <Sparkles className="h-4 w-4 mr-2" />
                 Categorize with AI
                 <ChevronRight className="h-4 w-4 ml-2" />
@@ -545,22 +444,15 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={(isOpen) => {
-        if (!isOpen && step !== 'upload') {
-          handleCancel();
-        } else {
-          onOpenChange(isOpen);
-        }
+        if (!isOpen && wizardState !== 'idle') handleCancel();
+        else onOpenChange(isOpen);
       }}>
         <DrawerContent className="max-h-[95vh] flex flex-col">
           <DrawerHeader className="text-left">
             <DrawerTitle>Import Bank Statement</DrawerTitle>
-            <DrawerDescription>
-              Upload to extract and categorize expenses
-            </DrawerDescription>
+            <DrawerDescription>Upload to extract and categorize expenses</DrawerDescription>
           </DrawerHeader>
-          <div className="flex-1 overflow-y-auto px-4 pb-4">
-            {content}
-          </div>
+          <div className="flex-1 overflow-y-auto px-4 pb-4">{content}</div>
         </DrawerContent>
       </Drawer>
     );
@@ -568,18 +460,13 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => {
-      if (!isOpen && step !== 'upload') {
-        handleCancel();
-      } else {
-        onOpenChange(isOpen);
-      }
+      if (!isOpen && wizardState !== 'idle') handleCancel();
+      else onOpenChange(isOpen);
     }}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>Import Bank Statement</DialogTitle>
-          <DialogDescription>
-            Upload your bank statement to automatically extract and categorize expenses
-          </DialogDescription>
+          <DialogDescription>Upload your bank statement to automatically extract and categorize expenses</DialogDescription>
         </DialogHeader>
         {content}
       </DialogContent>

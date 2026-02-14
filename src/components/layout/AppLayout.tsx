@@ -23,8 +23,10 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
+import ModeToggle from '@/components/mode/ModeToggle';
 import MobileNav from './MobileNav';
 import appLogo from '@/assets/logo.png';
+import { useSubscription } from '@/hooks/useSubscription';
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -43,6 +45,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { isMockMode } = useSubscription();
 
   const handleSignOut = async () => {
     await signOut();
@@ -53,6 +56,12 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0 overflow-y-auto">
+      {/* Mock Mode Banner */}
+      {isMockMode && (
+        <div className="bg-warning/90 text-warning-foreground text-center text-xs font-medium py-1 px-4">
+          🧪 Test Mode Active — Premium features unlocked for testing
+        </div>
+      )}
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 md:h-16 items-center justify-between px-4">
@@ -86,7 +95,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </nav>
 
           {/* User Menu */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 md:gap-2">
+            <ModeToggle />
             <ThemeToggle />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

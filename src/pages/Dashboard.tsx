@@ -21,7 +21,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function Dashboard() {
   const { user, loading } = useAuth();
-  const { isSimple, setMode } = useMode();
+  const { isSimple, isAdvanced, setMode } = useMode();
   const navigate = useNavigate();
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
@@ -64,17 +64,19 @@ export default function Dashboard() {
         {/* Budget Alerts */}
         <BudgetAlerts categories={categories} selectedMonth={selectedMonth} />
 
-        {/* Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-          <CategoryPieChart 
-            selectedMonth={selectedMonth} 
-            onCategoryClick={handleCategoryClick}
-          />
-          <CategoryBarChart selectedMonth={selectedMonth} />
-        </div>
-
-        {/* Trend Chart */}
-        <MonthlyTrendChart />
+        {/* Charts - Advanced only */}
+        {isAdvanced && (
+          <>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+              <CategoryPieChart 
+                selectedMonth={selectedMonth} 
+                onCategoryClick={handleCategoryClick}
+              />
+              <CategoryBarChart selectedMonth={selectedMonth} />
+            </div>
+            <MonthlyTrendChart />
+          </>
+        )}
 
         {/* Recent Expenses */}
         <Card className="border-border/50">

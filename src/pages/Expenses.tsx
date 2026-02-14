@@ -20,6 +20,7 @@ import { useExpenses } from '@/hooks/useExpenses';
 import { useCategories } from '@/hooks/useCategories';
 import { Expense, ExpenseFilters } from '@/types/expense';
 import { useAuth } from '@/contexts/AuthContext';
+import { useMode } from '@/contexts/ModeContext';
 import { exportExpensesToCSV, exportExpensesSummaryToCSV } from '@/lib/exportCSV';
 import { toast } from 'sonner';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -28,6 +29,7 @@ export default function Expenses() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const { isAdvanced } = useMode();
   const [searchParams] = useSearchParams();
   
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
@@ -108,16 +110,18 @@ export default function Expenses() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button 
-              variant="outline" 
-              size={isMobile ? "sm" : "default"}
-              className="gap-2"
-              onClick={() => setImportDialogOpen(true)}
-            >
-              <Upload className="h-4 w-4" />
-              <span className="hidden sm:inline">Import Statement</span>
-              <span className="sm:hidden">Import</span>
-            </Button>
+            {isAdvanced && (
+              <Button 
+                variant="outline" 
+                size={isMobile ? "sm" : "default"}
+                className="gap-2"
+                onClick={() => setImportDialogOpen(true)}
+              >
+                <Upload className="h-4 w-4" />
+                <span className="hidden sm:inline">Import Statement</span>
+                <span className="sm:hidden">Import</span>
+              </Button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button 

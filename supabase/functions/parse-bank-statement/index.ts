@@ -140,6 +140,13 @@ serve(async (req) => {
 
     if (!importId) return json({ success: false, error: 'importId is required' }, 400);
 
+    // Validate password input (Fix: INPUT_VALIDATION)
+    if (password !== undefined && password !== null) {
+      if (typeof password !== 'string' || password.length > 100) {
+        return json({ success: false, error: 'Invalid password format' }, 400);
+      }
+    }
+
     console.log(`[parse] importId=${importId} hasPassword=${!!password}`);
 
     // ── GET IMPORT RECORD ──
@@ -334,12 +341,12 @@ Include both debit and credit transactions.`;
       const errText = await aiResponse.text().catch(() => 'Unknown');
       console.error('[parse] AI HTTP error:', aiResponse.status, errText);
 
-      let errorMsg = 'AI service error. Please try again.';
-      if (aiResponse.status === 429) errorMsg = 'Rate limited. Please try again in a minute.';
-      if (aiResponse.status === 402) errorMsg = 'AI credits exhausted.';
+      let errorMsg = 'Unable to process statement. Please try again.';
+      if (aiResponse.status === 429) errorMsg = 'Service is busy. Please try again in a minute.';
+      if (aiResponse.status === 402) errorMsg = 'Processing limit reached. Please try again later.';
 
       await updateStatus(supabase, importId, 'failed', { error_message: errorMsg });
-      return json({ success: false, error: errorMsg }, aiResponse.status >= 400 && aiResponse.status < 500 ? aiResponse.status : 500);
+      return json({ success: false, error: errorMsg }, 500);
     }
 
     // Parse AI response
@@ -348,8 +355,8 @@ Include both debit and credit transactions.`;
 
     if (!content || content.trim().length === 0) {
       console.error('[parse] Empty AI response');
-      await updateStatus(supabase, importId, 'failed', { error_message: 'AI returned empty response. The PDF may be unreadable.' });
-      return json({ success: false, error: 'AI returned no content' }, 500);
+      await updateStatus(supabase, importId, 'failed', { error_message: 'Could not read the statement. Please try a different file.' });
+      return json({ success: false, error: 'Could not read statement' }, 500);
     }
 
     console.log('[parse] AI response length:', content.length, 'preview:', content.slice(0, 200));
@@ -361,9 +368,9 @@ Include both debit and credit transactions.`;
     } catch (parseErr) {
       console.error('[parse] JSON parse error:', parseErr, 'raw:', content.slice(0, 500));
       await updateStatus(supabase, importId, 'failed', {
-        error_message: 'Failed to parse AI response. The statement format may not be supported.',
+        error_message: 'Could not extract data from this statement. The format may not be supported.',
       });
-      return json({ success: false, error: 'Failed to parse extraction result' }, 500);
+      return json({ success: false, error: 'Could not extract data' }, 500);
     }
 
     // Handle AI-reported errors

@@ -44,9 +44,20 @@ export function useProfile() {
         return newProfile as Profile;
       }
 
+      // Resolve avatar_url: if it's a storage path (not a full URL), generate a short-lived signed URL
+      if (data.avatar_url && !data.avatar_url.startsWith('http')) {
+        const { data: signedUrlData } = await supabase.storage
+          .from('avatars')
+          .createSignedUrl(data.avatar_url, 60 * 60); // 1 hour expiry
+        if (signedUrlData?.signedUrl) {
+          data.avatar_url = signedUrlData.signedUrl;
+        }
+      }
+
       return data as Profile;
     },
     enabled: !!user,
+    staleTime: 30 * 60 * 1000, // 30 minutes - refresh signed URL periodically
   });
 }
 

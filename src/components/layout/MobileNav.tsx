@@ -1,12 +1,12 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Receipt, Tags, User, Wallet, Crown } from 'lucide-react';
+import { LayoutDashboard, Receipt, Wallet, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
   { href: '/', label: 'Home', icon: LayoutDashboard },
   { href: '/expenses', label: 'Expenses', icon: Receipt },
   { href: '/budgets', label: 'Budgets', icon: Wallet },
-  { href: '/pricing', label: 'Premium', icon: Crown },
+  { href: '/profile', label: 'Profile', icon: User },
 ];
 
 export default function MobileNav() {

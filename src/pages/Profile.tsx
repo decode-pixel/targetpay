@@ -12,11 +12,17 @@ import { useProfile, useUpdateProfile } from '@/hooks/useProfile';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import { useSearchParams } from 'react-router-dom';
+import { useSubscription } from '@/hooks/useSubscription';
+import { Switch } from '@/components/ui/switch';
 
 export default function Profile() {
   const { user, loading: authLoading, signOut } = useAuth();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [searchParams] = useSearchParams();
+  const { isMockMode, toggleMockMode } = useSubscription();
+  const showDev = import.meta.env.DEV || searchParams.get('dev') === 'true';
   
   const { data: profile, isLoading: profileLoading } = useProfile();
   const updateProfile = useUpdateProfile();
@@ -219,6 +225,36 @@ export default function Profile() {
             </Button>
           </CardContent>
         </Card>
+
+        {/* Developer Settings */}
+        {showDev && (
+          <Card className="border-warning/50 bg-warning/5">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                🧪 Developer Options
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-sm">Mock Premium Mode</p>
+                  <p className="text-xs text-muted-foreground">
+                    Test all premium features without Stripe
+                  </p>
+                </div>
+                <Switch
+                  checked={isMockMode}
+                  onCheckedChange={toggleMockMode}
+                />
+              </div>
+              {isMockMode && (
+                <p className="text-xs text-warning">
+                  ⚠️ All premium features are unlocked for testing.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Sign Out */}
         <Button

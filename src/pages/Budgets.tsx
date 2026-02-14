@@ -18,6 +18,8 @@ import { useBudgetRules } from '@/hooks/useBudgetRules';
 import { useFinancialSettings } from '@/hooks/useFinancialSettings';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useMode } from '@/contexts/ModeContext';
+import PremiumGate from '@/components/mode/PremiumGate';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -29,6 +31,7 @@ export default function Budgets() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const { isSimple } = useMode();
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -116,13 +119,17 @@ export default function Budgets() {
           <TabsContent value="budgets" className="space-y-4">
             {/* Health Score & Suggestions Row - Only show when smart rules enabled */}
             {smartRulesEnabled && !isLoading && categories.length > 0 && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <BudgetHealthScore metrics={healthMetrics} />
-                <BudgetSuggestions 
-                  suggestions={suggestions} 
-                  month={selectedMonth} 
-                />
-              </div>
+              isSimple ? (
+                <PremiumGate feature="Smart budget rules & AI suggestions" />
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <BudgetHealthScore metrics={healthMetrics} />
+                  <BudgetSuggestions 
+                    suggestions={suggestions} 
+                    month={selectedMonth} 
+                  />
+                </div>
+              )
             )}
 
             {/* Info Alert */}
@@ -249,7 +256,11 @@ export default function Budgets() {
 
             {/* Category Type Editor - Only in Smart Mode */}
             {smartRulesEnabled && categories.length > 0 && (
-              <CategoryTypeEditor categories={categories} />
+              isSimple ? (
+                <PremiumGate feature="Category type classification (Needs/Wants/Savings)" compact />
+              ) : (
+                <CategoryTypeEditor categories={categories} />
+              )
             )}
 
             {/* Category List for Manual Management */}

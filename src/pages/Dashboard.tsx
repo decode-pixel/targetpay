@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { format } from 'date-fns';
-import { Plus, Loader2 } from 'lucide-react';
+import { Plus, Loader2, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import AppLayout from '@/components/layout/AppLayout';
@@ -15,10 +15,13 @@ import { useExpenses } from '@/hooks/useExpenses';
 import { useCategories } from '@/hooks/useCategories';
 import { Expense } from '@/types/expense';
 import { useAuth } from '@/contexts/AuthContext';
+import { useMode } from '@/contexts/ModeContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function Dashboard() {
   const { user, loading } = useAuth();
+  const { isSimple, setMode } = useMode();
   const navigate = useNavigate();
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
@@ -58,7 +61,7 @@ export default function Dashboard() {
           onMonthChange={setSelectedMonth} 
         />
 
-        {/* Budget Alerts - now month-aware */}
+        {/* Budget Alerts */}
         <BudgetAlerts categories={categories} selectedMonth={selectedMonth} />
 
         {/* Charts */}
@@ -104,6 +107,29 @@ export default function Dashboard() {
             )}
           </CardContent>
         </Card>
+
+        {/* Simple Mode Upgrade Banner */}
+        {isSimple && (
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="py-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <Sparkles className="h-5 w-5 text-primary shrink-0" />
+                  <div>
+                    <p className="font-medium text-sm">Want AI-powered insights?</p>
+                    <p className="text-xs text-muted-foreground">
+                      Switch to AI Pro mode for smart budgeting, suggestions & more — it's free!
+                    </p>
+                  </div>
+                </div>
+                <Button size="sm" onClick={() => setMode('advanced')} className="shrink-0">
+                  <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                  Try AI Pro
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Expense Form Dialog */}

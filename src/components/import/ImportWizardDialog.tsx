@@ -65,7 +65,7 @@ const STEPS: { key: ImportWizardStep; label: string; icon: React.ReactNode }[] =
   { key: 'confirm', label: 'Confirm', icon: <Calendar className="h-4 w-4" /> },
 ];
 
-const TIMEOUT_MS = 90_000;
+const TIMEOUT_MS = 300_000; // 5 minutes for large PDFs
 
 export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardDialogProps) {
   const navigate = useNavigate();
@@ -133,7 +133,13 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
 
     if (s === 'processing' && (currentState === 'checking_encryption' || currentState === 'validating_password' || currentState === 'extracting')) {
       setWizardState('extracting');
-      setStatusText('Extracting transactions with AI...');
+      // Show progress from error_message field (used for chunk progress)
+      const progressMsg = importRecord.error_message;
+      if (progressMsg && progressMsg.startsWith('Processing page')) {
+        setStatusText(progressMsg);
+      } else {
+        setStatusText('Extracting transactions with AI...');
+      }
     } else if (s === 'password_required' && currentState !== 'waiting_password') {
       clearTimeout_();
       if (currentState === 'validating_password') {
@@ -249,13 +255,20 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
 
   const handleImport = async () => {
     if (!importId) return;
-    const updates = localTransactions.filter(t => t.is_selected).map(t => ({
-      id: t.id,
-      category_id: t.suggested_category_id,
-    }));
-    await importMutation.mutateAsync({ importId, transactions: updates });
-    onOpenChange(false);
-    navigate('/expenses');
+    try {
+      const updates = localTransactions
+        .filter(t => t.is_selected)
+        .map(t => ({
+          id: t.id,
+          category_id: t.suggested_category_id || null,
+        }));
+      const result = await importMutation.mutateAsync({ importId, transactions: updates });
+      onOpenChange(false);
+      navigate('/expenses');
+    } catch (err) {
+      // Error is handled by the mutation's onError
+      console.error('Import failed:', err);
+    }
   };
 
   const handleCancel = async () => {

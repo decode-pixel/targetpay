@@ -10,14 +10,11 @@ import { useCategories } from '@/hooks/useCategories';
 import { Category } from '@/types/expense';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { useMode } from '@/contexts/ModeContext';
-import PremiumGate from '@/components/mode/PremiumGate';
 
 export default function Categories() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const { isSimple } = useMode();
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
 
@@ -52,19 +49,13 @@ export default function Categories() {
               Manage your expense categories and budgets
             </p>
           </div>
-          {/* Desktop add button - hidden in Simple mode */}
-          {!isMobile && !isSimple && (
+          {!isMobile && (
             <Button onClick={() => setCategoryDialogOpen(true)} className="gap-2">
               <Plus className="h-4 w-4" />
               Add Category
             </Button>
           )}
         </div>
-
-        {/* Simple mode gate */}
-        {isSimple && (
-          <PremiumGate feature="Custom categories" compact />
-        )}
 
         {/* Category List */}
         {isLoading ? (
@@ -79,8 +70,8 @@ export default function Categories() {
         )}
       </div>
 
-      {/* Floating Add Button (mobile only, not in simple mode) */}
-      {isMobile && !isSimple && (
+      {/* Floating Add Button (mobile only) */}
+      {isMobile && (
         <FloatingAddButton onClick={() => setCategoryDialogOpen(true)} />
       )}
 

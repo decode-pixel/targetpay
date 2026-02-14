@@ -12,17 +12,11 @@ import { useProfile, useUpdateProfile } from '@/hooks/useProfile';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { useSearchParams } from 'react-router-dom';
-import { useSubscription } from '@/hooks/useSubscription';
-import { Switch } from '@/components/ui/switch';
 
 export default function Profile() {
   const { user, loading: authLoading, signOut } = useAuth();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [searchParams] = useSearchParams();
-  const { isMockMode, toggleMockMode } = useSubscription();
-  const showDev = import.meta.env.DEV || searchParams.get('dev') === 'true';
   
   const { data: profile, isLoading: profileLoading } = useProfile();
   const updateProfile = useUpdateProfile();
@@ -38,7 +32,6 @@ export default function Profile() {
     }
   });
 
-  // Update local state when profile loads
   if (profile && !hasChanges && fullName !== (profile.full_name || '')) {
     setFullName(profile.full_name || '');
   }
@@ -61,7 +54,6 @@ export default function Profile() {
     const file = e.target.files?.[0];
     if (!file || !user) return;
 
-    // Validate file
     if (!file.type.startsWith('image/')) {
       toast.error('Please select an image file');
       return;
@@ -78,18 +70,13 @@ export default function Profile() {
       const fileExt = file.name.split('.').pop();
       const fileName = `${user.id}/avatar.${fileExt}`;
 
-      // Upload to storage
       const { error: uploadError } = await supabase.storage
         .from('avatars')
         .upload(fileName, file, { upsert: true });
 
       if (uploadError) throw uploadError;
 
-      // Store the storage path (not a signed URL) in the database
-      await updateProfile.mutateAsync({ 
-        avatar_url: fileName 
-      });
-
+      await updateProfile.mutateAsync({ avatar_url: fileName });
       toast.success('Avatar updated!');
     } catch (error) {
       console.error('Upload error:', error);
@@ -130,9 +117,7 @@ export default function Profile() {
       <div className="max-w-lg mx-auto space-y-6 animate-fade-in">
         <div>
           <h1 className="text-xl md:text-2xl font-bold">Profile</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage your account settings
-          </p>
+          <p className="text-sm text-muted-foreground">Manage your account settings</p>
         </div>
 
         {/* Avatar Section */}
@@ -157,22 +142,12 @@ export default function Profile() {
                     <Camera className="h-6 w-6 text-white" />
                   )}
                 </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileChange}
-                  className="hidden"
-                />
+                <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
               </div>
               <div className="text-center">
-                <p className="font-semibold text-lg">
-                  {profile?.full_name || 'Set your name'}
-                </p>
+                <p className="font-semibold text-lg">{profile?.full_name || 'Set your name'}</p>
                 <p className="text-sm text-muted-foreground">{user.email}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Member since {memberSince}
-                </p>
+                <p className="text-xs text-muted-foreground mt-1">Member since {memberSince}</p>
               </div>
             </div>
           </CardContent>
@@ -189,79 +164,22 @@ export default function Profile() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="fullName">Full Name</Label>
-              <Input
-                id="fullName"
-                placeholder="Enter your name"
-                value={fullName}
-                onChange={(e) => handleNameChange(e.target.value)}
-                className="h-12"
-              />
+              <Input id="fullName" placeholder="Enter your name" value={fullName} onChange={(e) => handleNameChange(e.target.value)} className="h-12" />
             </div>
-
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                value={user.email || ''}
-                disabled
-                className="h-12 bg-muted"
-              />
-              <p className="text-xs text-muted-foreground">
-                Email cannot be changed
-              </p>
+              <Input id="email" value={user.email || ''} disabled className="h-12 bg-muted" />
+              <p className="text-xs text-muted-foreground">Email cannot be changed</p>
             </div>
-
-            <Button
-              onClick={handleSave}
-              disabled={!hasChanges || updateProfile.isPending}
-              className="w-full h-12"
-            >
-              {updateProfile.isPending ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4 mr-2" />
-              )}
+            <Button onClick={handleSave} disabled={!hasChanges || updateProfile.isPending} className="w-full h-12">
+              {updateProfile.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
               Save Changes
             </Button>
           </CardContent>
         </Card>
 
-        {/* Developer Settings */}
-        {showDev && (
-          <Card className="border-warning/50 bg-warning/5">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                🧪 Developer Options
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-sm">Mock Premium Mode</p>
-                  <p className="text-xs text-muted-foreground">
-                    Test all premium features without Stripe
-                  </p>
-                </div>
-                <Switch
-                  checked={isMockMode}
-                  onCheckedChange={toggleMockMode}
-                />
-              </div>
-              {isMockMode && (
-                <p className="text-xs text-warning">
-                  ⚠️ All premium features are unlocked for testing.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
         {/* Sign Out */}
-        <Button
-          variant="outline"
-          onClick={handleSignOut}
-          className="w-full h-12 text-destructive hover:text-destructive hover:bg-destructive/10"
-        >
+        <Button variant="outline" onClick={handleSignOut} className="w-full h-12 text-destructive hover:text-destructive hover:bg-destructive/10">
           Sign Out
         </Button>
       </div>

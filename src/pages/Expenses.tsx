@@ -1,15 +1,9 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { Plus, Loader2, Download, Upload } from 'lucide-react';
+import { Plus, Loader2, FileSpreadsheet, Upload } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import AppLayout from '@/components/layout/AppLayout';
 import FloatingAddButton from '@/components/layout/FloatingAddButton';
 import ExpenseList from '@/components/expenses/ExpenseList';
@@ -18,10 +12,11 @@ import ExpenseFiltersBar from '@/components/expenses/ExpenseFiltersBar';
 import ImportWizardDialog from '@/components/import/ImportWizardDialog';
 import { useExpenses } from '@/hooks/useExpenses';
 import { useCategories } from '@/hooks/useCategories';
+import { useProfile } from '@/hooks/useProfile';
 import { Expense, ExpenseFilters } from '@/types/expense';
 import { useAuth } from '@/contexts/AuthContext';
 import { useMode } from '@/contexts/ModeContext';
-import { exportExpensesToCSV, exportExpensesSummaryToCSV } from '@/lib/exportCSV';
+import { exportMonthlyReport } from '@/lib/exportSheet';
 import { toast } from 'sonner';
 import { useIsMobile } from '@/hooks/use-mobile';
 
@@ -34,6 +29,7 @@ export default function Expenses() {
   
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [filters, setFilters] = useState<ExpenseFilters>({
     month: format(new Date(), 'yyyy-MM'),
@@ -49,29 +45,35 @@ export default function Expenses() {
 
   const { data: expenses = [], isLoading } = useExpenses(filters);
   const { data: categories = [] } = useCategories();
+  const { data: profile } = useProfile();
 
   const handleEditExpense = (expense: Expense) => {
     setEditingExpense(expense);
     setExpenseDialogOpen(true);
   };
 
-  const handleExportCSV = () => {
+  const handleExportSheet = async () => {
     if (expenses.length === 0) {
-      toast.error('No expenses to export');
+      toast.error('No transactions for selected month.');
       return;
     }
-    const monthLabel = filters.month ? format(new Date(filters.month + '-01'), 'MMM-yyyy') : 'all';
-    exportExpensesToCSV(expenses, `expenses-${monthLabel}.csv`);
-    toast.success('Expenses exported successfully');
-  };
-
-  const handleExportSummary = () => {
-    if (expenses.length === 0) {
-      toast.error('No expenses to export');
+    if (!filters.month) {
+      toast.error('Please select a month to export.');
       return;
     }
-    exportExpensesSummaryToCSV(expenses, categories);
-    toast.success('Summary exported successfully');
+    setIsExporting(true);
+    toast.info('Generating report...');
+    try {
+      // Small delay to let UI update
+      await new Promise((r) => setTimeout(r, 100));
+      const filename = exportMonthlyReport(expenses, categories, profile ?? null, filters.month);
+      toast.success(`Report exported: ${filename}`);
+    } catch (err) {
+      toast.error('Failed to generate report.');
+      console.error(err);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const totalAmount = expenses.reduce((sum, exp) => sum + Number(exp.amount), 0);
@@ -122,27 +124,18 @@ export default function Expenses() {
                 <span className="sm:hidden">Import</span>
               </Button>
             )}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button 
-                  variant="outline" 
-                  size={isMobile ? "sm" : "default"}
-                  className="gap-2" 
-                  disabled={expenses.length === 0}
-                >
-                  <Download className="h-4 w-4" />
-                  <span className="hidden sm:inline">Export</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={handleExportCSV}>
-                  Export Expenses (CSV)
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleExportSummary}>
-                  Export Summary (CSV)
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Button 
+              variant="outline" 
+              size={isMobile ? "sm" : "default"}
+              className="gap-2" 
+              disabled={expenses.length === 0 || isExporting}
+              onClick={handleExportSheet}
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              <span className="hidden sm:inline">
+                {isExporting ? 'Generating...' : 'Export Sheet'}
+              </span>
+            </Button>
             {/* Desktop add button */}
             {!isMobile && (
               <Button onClick={() => setExpenseDialogOpen(true)} className="gap-2">

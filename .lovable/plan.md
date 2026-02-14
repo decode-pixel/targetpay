@@ -1,55 +1,70 @@
 
 
-# Mode-Aware System Upgrade
+# Google Sheets Professional Export
 
-Make the entire app respond instantly to Simple/Pro mode switching. No data deletion, no page reloads, just clean conditional rendering everywhere.
+Replace the current CSV export with a single, structured Google Sheets-compatible export that produces a professional monthly expense statement. No PDF logic involved.
+
+## Approach
+
+Since we can't use Google Sheets API directly from the browser (would require OAuth), we'll generate an **Excel (.xlsx) file** using the `xlsx` (SheetJS) library. Excel files open natively in Google Sheets with full formatting preserved (bold, column widths, number formats, frozen rows, alignment). This is the standard approach for "Google Sheets export" in web apps.
 
 ## What Changes
 
-### Dashboard (`src/pages/Dashboard.tsx`)
-- **Simple Mode**: Show only DashboardHeader (with stat cards), BudgetAlerts, and Recent Expenses list. Hide all charts (CategoryPieChart, CategoryBarChart, MonthlyTrendChart). Keep the "Try AI Pro" banner.
-- **Pro Mode**: Show everything as-is (charts, alerts, trends, recent expenses).
+### 1. Install `xlsx` dependency
+Add the SheetJS library (`xlsx`) for generating formatted spreadsheets client-side.
 
-### Expenses (`src/pages/Expenses.tsx`)
-- **Simple Mode**: Hide the "Import Statement" button entirely. Users can only add/edit/delete expenses manually and export CSV.
-- **Pro Mode**: Show Import Statement button and full import wizard.
+### 2. Replace `src/lib/exportCSV.ts` with `src/lib/exportSheet.ts`
+New file with a single export function: `exportMonthlyReport(expenses, categories, profile, month)`.
 
-### Budgets (`src/pages/Budgets.tsx`)
-- **Simple Mode**: Show only the Budgets tab with MonthlyBudgetEditor cards and monthly summary. Hide the Categories and Settings tabs entirely. Hide BudgetHealthScore, BudgetSuggestions, and the smart rules badge/description. Show a simplified header ("Budgets" instead of "Budget Management").
-- **Pro Mode**: Show all 3 tabs (Budgets, Categories, Settings), health score, suggestions, CategoryTypeEditor, smart rules badge -- everything as-is.
+The generated sheet will contain these sections in order:
 
-### Categories (`src/pages/Categories.tsx`)
-- No change needed -- manual category add/edit works in both modes. Categories page stays the same.
+**Header Section (rows 1-6)**
+- Row 1: "TargetPay" (app name, bold, large)
+- Row 2: "Monthly Expense Statement"
+- Row 3: User name (from profile)
+- Row 4: Month & Year (e.g., "February 2026")
+- Row 5: "Generated: 14 Feb 2026"
+- Row 6: blank spacer
 
-### Budget Alerts (`src/components/dashboard/BudgetAlerts.tsx`)
-- **Simple Mode**: Still show alerts (they're based on manual budgets, not AI). No change needed.
+**Summary Section (rows 7-13)**
+- Row 7: "SUMMARY" header (bold)
+- Rows 8-12: Total Income (N/A -- app tracks expenses only, so show 0), Total Expense, Net Balance, Total Transactions, Highest Expense Category
+- Row 13: blank spacer
 
-### Import Wizard (`src/components/import/ImportWizardDialog.tsx`)
-- No code change needed since the Import button itself is hidden in Simple mode on the Expenses page.
+**Transaction Table (rows 14+)**
+- Header row: Date | Description | Category | Debit | Credit | Balance (bold, frozen)
+- Sorted by date ascending
+- Date formatted as DD/MM/YYYY
+- Amount columns in INR currency format, right-aligned
+- Running balance column
+- Final totals row (bold)
 
-### Mode Toggle (`src/components/mode/ModeToggle.tsx`)
-- No change -- already works correctly with sliding indicator.
+**Category Summary Section (after transactions + 2 blank rows)**
+- Header: "CATEGORY SUMMARY" (bold)
+- Columns: Category | Total Amount | % of Total
+- Sorted by highest spending first
 
-### Mobile Nav (`src/components/layout/MobileNav.tsx`)
-- No change needed -- same nav items for both modes.
+### 3. Update `src/pages/Expenses.tsx`
+- Replace the Export dropdown with a single "Export to Sheet" button
+- Add `isExporting` state to disable button during generation
+- Show "Generating report..." toast while processing
+- Show success toast on completion
+- Show error toast if no data: "No transactions for selected month"
+- Pass `profile` data (from `useProfile`) and current `filters.month` to the export function
+
+## Files to Create
+- `src/lib/exportSheet.ts`
+
+## Files to Modify
+- `src/pages/Expenses.tsx` -- replace export dropdown with single Sheet export button
+- `package.json` -- add `xlsx` dependency
+
+## Files to Delete
+- `src/lib/exportCSV.ts` -- replaced entirely
 
 ## Technical Details
 
-All changes use the existing `useMode()` hook from `src/contexts/ModeContext.tsx`. Each page imports `useMode` and checks `isSimple` / `isAdvanced` to conditionally render sections. No new files, no new dependencies, no database changes.
+The `xlsx` library generates `.xlsx` files entirely client-side. No server calls needed. Google Sheets opens `.xlsx` files with formatting intact (bold, column widths, frozen rows, number formats). The file downloads as `TargetPay-Feb-2026.xlsx`.
 
-### Files to Modify
-1. **`src/pages/Dashboard.tsx`** -- wrap charts in `{isAdvanced && ...}`
-2. **`src/pages/Expenses.tsx`** -- wrap Import button in `{isAdvanced && ...}`
-3. **`src/pages/Budgets.tsx`** -- use `isSimple` to hide tabs, health score, suggestions, smart rules UI; simplify header in Simple mode
-
-### What Stays the Same in Both Modes
-- Manual expense add/edit/delete
-- Manual category add/edit/delete
-- Manual monthly budget setting
-- Dashboard header with spending stats
-- Budget alerts (threshold-based)
-- CSV export
-- Profile settings
-- Theme toggle
-- Mode toggle in header
+Since the app only tracks expenses (no income table), "Total Income" will show as 0 and "Credit" column will be empty. The "Balance" column will show a running total of cumulative spending. If we later add income tracking, these columns are ready.
 

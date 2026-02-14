@@ -26,7 +26,6 @@ import {
 } from '@/hooks/useStatementImport';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { useMode } from '@/contexts/ModeContext';
 import { toast as sonnerToast } from 'sonner';
 
 interface ImportWizardDialogProps {
@@ -67,12 +66,11 @@ const STEPS: { key: ImportWizardStep; label: string; icon: React.ReactNode }[] =
   { key: 'confirm', label: 'Confirm', icon: <Calendar className="h-4 w-4" /> },
 ];
 
-const TIMEOUT_MS = 300_000; // 5 minutes for large PDFs
+const TIMEOUT_MS = 600_000; // 10 minutes for large PDFs
 
 export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardDialogProps) {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const { isSimple } = useMode();
   
   const [wizardState, setWizardState] = useState<WizardState>('idle');
   const [importId, setImportId] = useState<string | null>(null);
@@ -105,14 +103,9 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
   // Sync extracted transactions
   useEffect(() => {
     if (extractedTransactions.length > 0) {
-      if (isSimple && extractedTransactions.length > 100) {
-        sonnerToast.warning('Simple mode: Limited to 100 transactions. Upgrade for unlimited.');
-        setLocalTransactions(extractedTransactions.slice(0, 100));
-      } else {
-        setLocalTransactions(extractedTransactions);
-      }
+      setLocalTransactions(extractedTransactions);
     }
-  }, [extractedTransactions, isSimple]);
+  }, [extractedTransactions]);
 
   // Timeout helper
   const startTimeout = useCallback((msg: string) => {
@@ -164,11 +157,6 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
       setErrorMessage(null);
       setWizardState('preview_ready');
       refetchTransactions();
-    } else if (s === 'password_required' && isSimple) {
-      // Block encrypted PDFs in Simple mode
-      clearTimeout_();
-      setErrorMessage('Password-protected PDFs require AI Pro mode. Please upgrade or use a normal PDF.');
-      setWizardState('error');
     } else if (s === 'categorizing') {
       setWizardState('categorizing');
     } else if (s === 'ready') {

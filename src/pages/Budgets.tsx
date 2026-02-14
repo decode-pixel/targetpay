@@ -18,8 +18,6 @@ import { useBudgetRules } from '@/hooks/useBudgetRules';
 import { useFinancialSettings } from '@/hooks/useFinancialSettings';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { useMode } from '@/contexts/ModeContext';
-import PremiumGate from '@/components/mode/PremiumGate';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -31,7 +29,6 @@ export default function Budgets() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const { isSimple } = useMode();
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -43,7 +40,6 @@ export default function Budgets() {
 
   const smartRulesEnabled = financialSettings?.smart_rules_enabled ?? true;
 
-  // Calculate spending per category for the selected month
   const categorySpending = expenses.reduce((acc, exp) => {
     if (exp.category_id) {
       acc[exp.category_id] = (acc[exp.category_id] || 0) + Number(exp.amount);
@@ -108,7 +104,7 @@ export default function Budgets() {
           <MonthYearPicker value={selectedMonth} onChange={setSelectedMonth} />
         </div>
 
-        {/* Tabs for different budget views */}
+        {/* Tabs */}
         <Tabs defaultValue="budgets" className="space-y-4">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="budgets">Budgets</TabsTrigger>
@@ -117,22 +113,14 @@ export default function Budgets() {
           </TabsList>
 
           <TabsContent value="budgets" className="space-y-4">
-            {/* Health Score & Suggestions Row - Only show when smart rules enabled */}
+            {/* Health Score & Suggestions - always available */}
             {smartRulesEnabled && !isLoading && categories.length > 0 && (
-              isSimple ? (
-                <PremiumGate feature="Smart budget rules & AI suggestions" />
-              ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <BudgetHealthScore metrics={healthMetrics} />
-                  <BudgetSuggestions 
-                    suggestions={suggestions} 
-                    month={selectedMonth} 
-                  />
-                </div>
-              )
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <BudgetHealthScore metrics={healthMetrics} />
+                <BudgetSuggestions suggestions={suggestions} month={selectedMonth} />
+              </div>
             )}
 
-            {/* Info Alert */}
             <Alert className="bg-primary/5 border-primary/20">
               <Info className="h-4 w-4" />
               <AlertDescription>
@@ -180,7 +168,7 @@ export default function Budgets() {
               </div>
             )}
 
-            {/* Summary Card */}
+            {/* Summary */}
             {!isLoading && categories.length > 0 && (
               <Card className="border-border/50">
                 <CardHeader>
@@ -188,9 +176,7 @@ export default function Budgets() {
                     <Calendar className="h-4 w-4" />
                     {monthLabel} Summary
                   </CardTitle>
-                  <CardDescription>
-                    Budget overview for the selected month
-                  </CardDescription>
+                  <CardDescription>Budget overview for the selected month</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -224,9 +210,7 @@ export default function Budgets() {
             )}
           </TabsContent>
 
-          {/* Categories tab - available in BOTH modes */}
           <TabsContent value="categories" className="space-y-4">
-            {/* Add Category Button - Desktop */}
             {!isMobile && (
               <div className="flex justify-end">
                 <Button onClick={handleAddCategory} className="gap-2">
@@ -236,13 +220,12 @@ export default function Budgets() {
               </div>
             )}
 
-            {/* Mode-specific info */}
             <Alert className="bg-primary/5 border-primary/20">
               <Info className="h-4 w-4" />
               <AlertDescription>
                 {smartRulesEnabled ? (
                   <>
-                    <strong>Smart Mode:</strong> Manually create categories with custom icons, colors, and budgets. 
+                    <strong>Smart Mode:</strong> Create categories with custom icons, colors, and budgets. 
                     AI will suggest improvements but never overwrite your settings.
                   </>
                 ) : (
@@ -254,16 +237,10 @@ export default function Budgets() {
               </AlertDescription>
             </Alert>
 
-            {/* Category Type Editor - Only in Smart Mode */}
             {smartRulesEnabled && categories.length > 0 && (
-              isSimple ? (
-                <PremiumGate feature="Category type classification (Needs/Wants/Savings)" compact />
-              ) : (
-                <CategoryTypeEditor categories={categories} />
-              )
+              <CategoryTypeEditor categories={categories} />
             )}
 
-            {/* Category List for Manual Management */}
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -327,12 +304,10 @@ export default function Budgets() {
         </Tabs>
       </div>
 
-      {/* Floating Add Button (mobile only) - shown in Categories tab */}
       {isMobile && (
         <FloatingAddButton onClick={handleAddCategory} />
       )}
 
-      {/* Category Form Dialog */}
       <CategoryFormDialog
         open={categoryDialogOpen}
         onOpenChange={(open) => {

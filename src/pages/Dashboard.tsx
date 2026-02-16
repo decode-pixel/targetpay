@@ -10,6 +10,7 @@ import CategoryPieChart from '@/components/dashboard/CategoryPieChart';
 import CategoryBarChart from '@/components/dashboard/CategoryBarChart';
 import MonthlyTrendChart from '@/components/dashboard/MonthlyTrendChart';
 import BudgetAlerts from '@/components/dashboard/BudgetAlerts';
+import BudgetInsights from '@/components/dashboard/BudgetInsights';
 import ExpenseList from '@/components/expenses/ExpenseList';
 import ExpenseFormDialog from '@/components/expenses/ExpenseFormDialog';
 import { useExpenses } from '@/hooks/useExpenses';
@@ -73,6 +74,9 @@ export default function Dashboard() {
 
         {/* Budget Alerts */}
         <BudgetAlerts categories={categories} selectedMonth={selectedMonth} />
+
+        {/* AI Insights - Pro mode only */}
+        {isAdvanced && <BudgetInsights selectedMonth={selectedMonth} />}
 
         {/* Charts - Advanced only */}
         {isAdvanced && (

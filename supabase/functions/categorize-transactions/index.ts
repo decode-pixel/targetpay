@@ -167,10 +167,10 @@ serve(async (req) => {
     const suggestedNewCategories: SuggestedCategory[] = [];
     
     if (unmatchedTransactions.length > 0) {
-      const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+      const BYTEZ_API_KEY = Deno.env.get('BYTEZ_API_KEY');
       
-      if (!LOVABLE_API_KEY) {
-        console.error('LOVABLE_API_KEY not configured');
+      if (!BYTEZ_API_KEY) {
+        console.error('BYTEZ_API_KEY not configured');
         return new Response(
           JSON.stringify({ success: false, error: 'AI service not configured' }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -257,14 +257,13 @@ Use common finance icons: utensils, car, shopping-bag, receipt, home, heart-puls
 Use vibrant colors: #F97316, #3B82F6, #EC4899, #8B5CF6, #10B981, #06B6D4, #EF4444, #F59E0B.
 Return ONLY valid JSON.`;
 
-        const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        const aiResponse = await fetch('https://api.bytez.com/models/v2/openai/gpt-4o', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+            'Authorization': BYTEZ_API_KEY,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'google/gemini-3-flash-preview',
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: `Categorize these transactions:\n${transactionList}` }

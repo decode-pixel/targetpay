@@ -1,155 +1,145 @@
 
 
-# Fix All Critical Bugs in TargetPay
+# UX, Performance, and Feature Upgrades for TargetPay
 
-Fixing 8 identified bugs without adding new features. Only stability and correctness improvements.
-
----
-
-## 1. Fix Profile State Sync (Profile.tsx)
-
-**Bug**: Line 29 uses `useState(() => { ... })` which is an incorrect pattern -- it runs the callback as a lazy initializer once, not as an effect. Profile name won't sync after initial load.
-
-**Fix**: Replace the incorrect `useState` call and the conditional state sync (lines 29-35) with a proper `useEffect` that sets `fullName` whenever `profile` data changes.
-
-```
-useEffect(() => {
-  if (profile && !hasChanges) {
-    setFullName(profile.full_name || '');
-  }
-}, [profile]);
-```
-
-Remove the `if (profile && !hasChanges && fullName !== ...)` block at line 34-36.
+Improvements across authentication, validation, performance, mobile UX, and dashboard usability. No changes to already-fixed bugs.
 
 ---
 
-## 2. Fix Navigate-During-Render (4 pages)
+## 1. Password Reset Flow
 
-**Bug**: `navigate('/auth')` is called directly in the render body of Dashboard.tsx (line 51), Expenses.tsx (line 99), Categories.tsx, and Budgets.tsx (line 71). This triggers React warnings and potential render loops.
+**Files**: `src/pages/Auth.tsx`, `src/pages/ResetPassword.tsx` (new), `src/App.tsx`
 
-**Fix**: In each file, replace the bare `if (!user) { navigate('/auth'); return null; }` block with a `useEffect`:
-
-```
-useEffect(() => {
-  if (!loading && !user) {
-    navigate('/auth');
-  }
-}, [user, loading, navigate]);
-
-if (!user) return null;
-```
-
-Files: `Dashboard.tsx`, `Expenses.tsx`, `Categories.tsx`, `Budgets.tsx`
+- Add a "Forgot Password?" link below the Sign In password field
+- Add `handleForgotPassword` function that calls `supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + '/reset-password' })`
+- Validate email before sending (show error if empty/invalid)
+- Show success toast: "Check your email for a password reset link"
+- Create new `/reset-password` page that:
+  - Detects `type=recovery` in URL hash
+  - Shows a "Set New Password" form with confirm field
+  - Calls `supabase.auth.updateUser({ password })`
+  - Redirects to `/` on success
+- Add route in `App.tsx`: `<Route path="/reset-password" element={<ResetPassword />} />`
 
 ---
 
-## 3. Fix Dashboard Budget Calculation (DashboardHeader.tsx)
+## 2. Expense Amount Validation
 
-**Bug**: Line 24 sums `cat.monthly_budget` (the default) instead of using month-specific `category_budgets`. This causes the dashboard header totals to differ from StatCards which correctly uses `useAllEffectiveBudgets`.
+**File**: `src/components/expenses/ExpenseFormDialog.tsx`
 
-**Fix**: Import and use `useAllEffectiveBudgets` from `useCategoryBudgets.ts` in DashboardHeader, exactly like StatCards does:
-
-```
-const { budgets: effectiveBudgets } = useAllEffectiveBudgets(selectedMonth, categories);
-
-// In stats calculation:
-let totalBudget = 0;
-categories.forEach(cat => {
-  totalBudget += effectiveBudgets.get(cat.id) || 0;
-});
-```
+- Add validation in `handleSubmit` before processing:
+  - If `parseFloat(amount) <= 0` or `isNaN(parseFloat(amount))`, show inline error "Amount must be greater than zero" and return
+- Add `amountError` state, clear it on amount change
+- Show error text below the amount input field
+- Also update the submit button disabled condition: `disabled={isSubmitting || !amount || parseFloat(amount) <= 0}`
 
 ---
 
-## 4. Fix Export Description Column (exportSheet.ts)
+## 3. Import Wizard Close Confirmation
 
-**Bug**: Line 60 uses `e.note || '-'` for the Description column, losing category context when note is empty.
+**File**: `src/components/import/ImportWizardDialog.tsx`
 
-**Fix**: Build a smarter description:
-```
-const catName = e.category?.name || 'Uncategorized';
-const description = e.note ? `${e.note} (${catName})` : catName;
-```
-
----
-
-## 5. Fix Import Wizard Select-All Stale Closure (ImportWizardDialog.tsx)
-
-**Bug**: Line 314 reads `localTransactions` inside `handleSelectAll` but it's in the dependency array, creating stale closure issues on rapid toggles.
-
-**Fix**: Use a ref to avoid stale closure:
-```
-const localTransactionsRef = useRef(localTransactions);
-localTransactionsRef.current = localTransactions;
-
-const handleSelectAll = useCallback((selected: boolean) => {
-  setLocalTransactions(prev => prev.map(t => ({ ...t, is_selected: selected })));
-  localTransactionsRef.current.forEach(t => 
-    updateTransaction.mutate({ id: t.id, is_selected: selected })
-  );
-}, [updateTransaction]);
-```
+- Add `showCloseConfirm` state (boolean)
+- Replace direct `onOpenChange` with a wrapper function:
+  - If wizard is in progress (state is not `idle` and not `error`), show an AlertDialog: "Import in progress. Are you sure you want to close? Unsaved data will be lost."
+  - On confirm: call `handleCancel()` (already handles cleanup)
+  - On cancel: dismiss alert
+- Apply this wrapper to both Dialog and Drawer `onOpenChange` props
 
 ---
 
-## 6. Fix Mobile Navigation -- Add Categories Tab (MobileNav.tsx)
+## 4. Dashboard Add-Expense Button in Simple Mode
 
-**Bug**: Categories page has no entry in the mobile bottom nav, making it inaccessible on mobile.
+**File**: `src/pages/Dashboard.tsx`
 
-**Fix**: Add a Categories nav item (using `Grid3X3` or `LayoutGrid` icon) between Expenses and Budgets. Adjust the 4-item layout to 5 items:
-
-```
-const navItems = [
-  { href: '/', label: 'Home', icon: LayoutDashboard },
-  { href: '/expenses', label: 'Expenses', icon: Receipt },
-  { href: '/categories', label: 'Categories', icon: LayoutGrid },
-  { href: '/budgets', label: 'Budgets', icon: Wallet },
-  { href: '/profile', label: 'Profile', icon: User },
-];
-```
+- Import `FloatingAddButton` and `useIsMobile`
+- Add a floating add button for mobile users (both modes) at the bottom of the page
+- For desktop Simple mode users, add an "Add Expense" button in the Recent Expenses card header (next to "View all")
+- The button opens the existing `ExpenseFormDialog`
 
 ---
 
-## 7. Fix Export Freeze Pane (exportSheet.ts)
+## 5. Dashboard Empty State Improvement
 
-**Bug**: `ws['!freeze']` is not a valid SheetJS property. The header row doesn't actually freeze.
+**File**: `src/pages/Dashboard.tsx`
 
-**Fix**: Replace with the correct SheetJS property `!views`:
-```
-ws['!views'] = [{ state: 'frozen', ySplit: tableHeaderRow + 1 }];
-```
-
-Remove the invalid `ws['!freeze']` line.
-
----
-
-## 8. Fix Avatar Refresh (useProfile.ts)
-
-**Bug**: The signed URL (1 hour expiry) may expire while the app is open, but `staleTime` is 30 minutes. This is mostly fine but the query should also refetch on window focus to handle cases where the user returns to the app after the URL expired.
-
-**Fix**: Add `refetchOnWindowFocus: true` (already default in react-query, but explicitly set it) and reduce `staleTime` to 15 minutes to ensure the URL refreshes before the 1-hour expiry:
-
-```
-staleTime: 15 * 60 * 1000, // 15 minutes
-refetchOnWindowFocus: true,
-```
+- Replace the plain text "No expenses this month" with a richer empty state:
+  - Show a `Receipt` icon in a rounded muted circle
+  - "No expenses this month" heading
+  - "Tap + to add your first expense" subtitle
+  - Reuses the same pattern already in `ExpenseList.tsx`
 
 ---
 
-## Summary of Files to Modify
+## 6. Mode Toggle Labels on Mobile
 
-| File | Fix |
-|------|-----|
-| `src/pages/Profile.tsx` | useEffect for state sync |
-| `src/pages/Dashboard.tsx` | useEffect for navigate |
-| `src/pages/Expenses.tsx` | useEffect for navigate |
-| `src/pages/Categories.tsx` | useEffect for navigate |
-| `src/pages/Budgets.tsx` | useEffect for navigate |
-| `src/components/dashboard/DashboardHeader.tsx` | useAllEffectiveBudgets |
-| `src/lib/exportSheet.ts` | description + freeze pane |
-| `src/components/import/ImportWizardDialog.tsx` | ref for selectAll |
-| `src/components/layout/MobileNav.tsx` | add Categories tab |
-| `src/hooks/useProfile.ts` | staleTime + refetch |
+**File**: `src/components/mode/ModeToggle.tsx`
 
-No new files. No database changes. No new dependencies.
+- Remove `hidden sm:inline` from the label spans so "Simple" and "AI Pro" are always visible
+- Adjust button padding slightly for mobile to accommodate text
+
+---
+
+## 7. Export Button Label on Mobile
+
+**File**: `src/pages/Expenses.tsx`
+
+- The Export Sheet button currently hides label text on mobile (only shows icon). Change to always show a short label:
+  - Show "Export" on mobile (instead of hidden)
+  - Show "Export Sheet" on desktop (keep as-is)
+
+---
+
+## 8. Performance: Remove Duplicate Queries
+
+**Files**: `src/pages/Dashboard.tsx`, `src/components/dashboard/DashboardHeader.tsx`, `src/components/dashboard/StatCards.tsx`
+
+Both `DashboardHeader` and `StatCards` independently call `useExpenses`, `useCategories`, and `useAllEffectiveBudgets` with the same parameters. Since `Dashboard.tsx` already calls `useExpenses` and `useCategories`, refactor to pass data as props:
+
+- `Dashboard.tsx` becomes the single source: calls `useExpenses`, `useCategories`, and `useAllEffectiveBudgets`
+- Pass `expenses`, `categories`, and `effectiveBudgets` as props to `DashboardHeader`
+- Remove `StatCards` component entirely (its data is already shown in `DashboardHeader`'s stat cards). `StatCards` is not rendered anywhere in Dashboard currently anyway.
+- This eliminates 4 duplicate queries per page load
+
+Note: TanStack Query does deduplicate identical queries within the same render cycle, but having the data flow via props is cleaner architecture and prevents accidental mismatches.
+
+---
+
+## 9. Performance: Reduce Google Fonts
+
+**File**: `src/index.css`
+
+- Remove unused font imports (lines 1-3, 5-6): Lato, EB Garamond, Fira Code, Lora, Space Mono
+- Keep only Inter (line 4) which is the actual app font
+- This eliminates 5 unnecessary network requests on page load
+
+---
+
+## 10. Import Select-All Batch Optimization
+
+**File**: `src/components/import/ImportWizardDialog.tsx`
+
+- Currently `handleSelectAll` calls `updateTransaction.mutate()` once per transaction in a loop, which fires N individual network requests
+- Replace with a single batch approach: collect all IDs, then call a single RPC or loop with Promise.all but with a debounce/batch
+- Since there's no batch RPC available, use `Promise.all` with the existing mutation but skip individual toasts, and only show one success/error at the end
+- Better approach: just update local state immediately (already done), and defer the DB sync to when the user proceeds to the next step (categorize/import), since the `handleImport` function already sends final selections
+
+---
+
+## Summary of Files
+
+| # | Change | Files |
+|---|--------|-------|
+| 1 | Password reset flow | `Auth.tsx`, new `ResetPassword.tsx`, `App.tsx` |
+| 2 | Amount validation | `ExpenseFormDialog.tsx` |
+| 3 | Import close confirmation | `ImportWizardDialog.tsx` |
+| 4 | Dashboard add button | `Dashboard.tsx` |
+| 5 | Dashboard empty state | `Dashboard.tsx` |
+| 6 | Mode toggle labels | `ModeToggle.tsx` |
+| 7 | Export button label | `Expenses.tsx` |
+| 8 | Remove duplicate queries | `Dashboard.tsx`, `DashboardHeader.tsx` |
+| 9 | Remove unused fonts | `index.css` |
+| 10 | Batch select-all | `ImportWizardDialog.tsx` |
+
+No database migrations needed. No new dependencies.
+

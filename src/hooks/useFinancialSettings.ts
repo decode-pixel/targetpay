@@ -71,8 +71,13 @@ export function useUpdateFinancialSettings() {
       if (error) throw error;
       return data as UserFinancialSettings;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['financial-settings'] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['financial-settings'] }),
+        queryClient.invalidateQueries({ queryKey: ['categories'] }),
+        queryClient.invalidateQueries({ queryKey: ['expenses'] }),
+        queryClient.invalidateQueries({ queryKey: ['category-budgets'] }),
+      ]);
       toast.success('Settings saved');
     },
     onError: (error) => {

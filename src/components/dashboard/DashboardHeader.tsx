@@ -2,22 +2,32 @@ import { useMemo } from 'react';
 import { format } from 'date-fns';
 import { TrendingDown, Wallet, PiggyBank } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
-import { useExpenses } from '@/hooks/useExpenses';
-import { useCategories } from '@/hooks/useCategories';
-import { useAllEffectiveBudgets } from '@/hooks/useCategoryBudgets';
 import { cn } from '@/lib/utils';
 import MonthYearPicker from './MonthYearPicker';
+import { Expense } from '@/types/expense';
+
+interface Category {
+  id: string;
+  name: string;
+  color: string;
+  icon: string;
+  monthly_budget: number | null;
+  budget_alert_threshold: number;
+  category_type: string | null;
+  user_id: string;
+  created_at: string;
+  updated_at: string;
+}
 
 interface DashboardHeaderProps {
   selectedMonth: string;
   onMonthChange: (month: string) => void;
+  expenses: Expense[];
+  categories: Category[];
+  effectiveBudgets: Map<string, number>;
 }
 
-export default function DashboardHeader({ selectedMonth, onMonthChange }: DashboardHeaderProps) {
-  const { data: expenses = [] } = useExpenses({ month: selectedMonth });
-  const { data: categories = [] } = useCategories();
-  const { budgets: effectiveBudgets } = useAllEffectiveBudgets(selectedMonth, categories);
-
+export default function DashboardHeader({ selectedMonth, onMonthChange, expenses, categories, effectiveBudgets }: DashboardHeaderProps) {
   const stats = useMemo(() => {
     const totalExpense = expenses.reduce((sum, exp) => sum + Number(exp.amount), 0);
     let totalBudget = 0;

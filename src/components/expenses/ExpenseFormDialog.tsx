@@ -54,6 +54,7 @@ export default function ExpenseFormDialog({ open, onOpenChange, expense }: Expen
   const [date, setDate] = useState<Date>(new Date());
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [note, setNote] = useState('');
+  const [amountError, setAmountError] = useState('');
 
   const isEditing = !!expense;
 
@@ -81,6 +82,13 @@ export default function ExpenseFormDialog({ open, onOpenChange, expense }: Expen
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const parsedAmount = parseFloat(amount);
+    if (!amount || isNaN(parsedAmount) || parsedAmount <= 0) {
+      setAmountError('Amount must be greater than zero');
+      return;
+    }
+    setAmountError('');
 
     const expenseData = {
       amount: parseFloat(amount),
@@ -121,11 +129,12 @@ export default function ExpenseFormDialog({ open, onOpenChange, expense }: Expen
             placeholder="0.00"
             className="pl-8 h-12 text-xl font-semibold"
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={(e) => { setAmount(e.target.value); setAmountError(''); }}
             autoFocus={!isMobile}
             required
           />
         </div>
+        {amountError && <p className="text-xs text-destructive">{amountError}</p>}
       </div>
 
       {/* Category */}
@@ -230,7 +239,7 @@ export default function ExpenseFormDialog({ open, onOpenChange, expense }: Expen
         <Button
           type="submit"
           className="flex-1 h-12 text-base"
-          disabled={isSubmitting || !amount}
+          disabled={isSubmitting || !amount || parseFloat(amount) <= 0}
         >
           {isSubmitting ? (
             <>

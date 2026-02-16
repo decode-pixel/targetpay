@@ -1,145 +1,102 @@
 
+# Make Budget Mode (Flexible/Guided/Strict) Actually Work
 
-# UX, Performance, and Feature Upgrades for TargetPay
-
-Improvements across authentication, validation, performance, mobile UX, and dashboard usability. No changes to already-fixed bugs.
-
----
-
-## 1. Password Reset Flow
-
-**Files**: `src/pages/Auth.tsx`, `src/pages/ResetPassword.tsx` (new), `src/App.tsx`
-
-- Add a "Forgot Password?" link below the Sign In password field
-- Add `handleForgotPassword` function that calls `supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + '/reset-password' })`
-- Validate email before sending (show error if empty/invalid)
-- Show success toast: "Check your email for a password reset link"
-- Create new `/reset-password` page that:
-  - Detects `type=recovery` in URL hash
-  - Shows a "Set New Password" form with confirm field
-  - Calls `supabase.auth.updateUser({ password })`
-  - Redirects to `/` on success
-- Add route in `App.tsx`: `<Route path="/reset-password" element={<ResetPassword />} />`
+Currently, the Rule Enforcement setting (flexible/guided/strict) is stored in the database but has no effect on the app. Changing it does nothing visible. This plan makes each mode behave differently across the entire system with live preview.
 
 ---
 
-## 2. Expense Amount Validation
+## How Each Mode Will Behave
 
-**File**: `src/components/expenses/ExpenseFormDialog.tsx`
-
-- Add validation in `handleSubmit` before processing:
-  - If `parseFloat(amount) <= 0` or `isNaN(parseFloat(amount))`, show inline error "Amount must be greater than zero" and return
-- Add `amountError` state, clear it on amount change
-- Show error text below the amount input field
-- Also update the submit button disabled condition: `disabled={isSubmitting || !amount || parseFloat(amount) <= 0}`
-
----
-
-## 3. Import Wizard Close Confirmation
-
-**File**: `src/components/import/ImportWizardDialog.tsx`
-
-- Add `showCloseConfirm` state (boolean)
-- Replace direct `onOpenChange` with a wrapper function:
-  - If wizard is in progress (state is not `idle` and not `error`), show an AlertDialog: "Import in progress. Are you sure you want to close? Unsaved data will be lost."
-  - On confirm: call `handleCancel()` (already handles cleanup)
-  - On cancel: dismiss alert
-- Apply this wrapper to both Dialog and Drawer `onOpenChange` props
+| Behavior | Flexible | Guided | Strict |
+|----------|----------|--------|--------|
+| Over-budget warning | None | Yellow warning banner | Red blocking alert |
+| Adding expense over budget | Always allowed | Allowed with warning toast | Requires "Override" confirmation |
+| Budget allocation sliders | Free adjustment | Soft warning if outside 50/30/20 | Locked to 50/30/20 ratios |
+| Health score deductions | Light (-5 per violation) | Medium (-10 per violation) | Heavy (-15 per violation) |
+| Suggestions tone | Tips only | Warnings + tips | Urgent warnings |
+| Budget card styling | Normal | Orange border when near limit | Red border + shake when over |
 
 ---
 
-## 4. Dashboard Add-Expense Button in Simple Mode
+## Changes by File
 
-**File**: `src/pages/Dashboard.tsx`
+### 1. `src/components/budget/FinancialSettingsCard.tsx` -- Live Preview on Mode Change
 
-- Import `FloatingAddButton` and `useIsMobile`
-- Add a floating add button for mobile users (both modes) at the bottom of the page
-- For desktop Simple mode users, add an "Add Expense" button in the Recent Expenses card header (next to "View all")
-- The button opens the existing `ExpenseFormDialog`
+- When user clicks Flexible/Guided/Strict, immediately show a **live preview card** below the selector showing:
+  - Mode name with icon
+  - 3-4 bullet points describing what this mode does
+  - Animated allocation bar showing Needs/Wants/Savings split
+- In **Strict** mode: lock the percentage sliders to fixed 50/30/20 values (disable sliders, auto-set values)
+- In **Guided** mode: show a warning badge if percentages deviate more than 10% from 50/30/20
+- In **Flexible** mode: no restrictions on sliders
+- Auto-save mode change immediately (like Smart Rules toggle already does)
 
----
+### 2. `src/hooks/useBudgetRules.ts` -- Mode-Aware Suggestions & Health Score
 
-## 5. Dashboard Empty State Improvement
+- Import `budgetMode` from financial settings into the rules engine
+- Adjust health score deductions based on mode:
+  - Flexible: -5 per over-budget category
+  - Guided: -10 per over-budget category
+  - Strict: -15 per over-budget category
+- Adjust suggestion severity based on mode:
+  - Flexible: only show at 90% and 100% thresholds
+  - Guided: show at 70%, 90%, 100% (current behavior)
+  - Strict: show at 50%, 70%, 90%, 100% -- with stronger wording
+- Add a new suggestion type for strict mode: "Budget violation" (instead of just "warning")
 
-**File**: `src/pages/Dashboard.tsx`
+### 3. `src/components/expenses/ExpenseFormDialog.tsx` -- Enforce Rules on Expense Entry
 
-- Replace the plain text "No expenses this month" with a richer empty state:
-  - Show a `Receipt` icon in a rounded muted circle
-  - "No expenses this month" heading
-  - "Tap + to add your first expense" subtitle
-  - Reuses the same pattern already in `ExpenseList.tsx`
+- Fetch financial settings and category budgets
+- After user fills amount and selects category, check if this expense would exceed the category budget:
+  - **Flexible**: No check, submit normally
+  - **Guided**: Show a yellow warning toast ("This will exceed your Food budget by X") but allow submission
+  - **Strict**: Show a confirmation AlertDialog: "This expense exceeds your budget by X. Are you sure you want to override?" with "Cancel" and "Override & Save" buttons
 
----
+### 4. `src/components/categories/MonthlyBudgetEditor.tsx` -- Visual Mode Feedback
 
-## 6. Mode Toggle Labels on Mobile
+- Accept `budgetMode` as a prop (or fetch from settings)
+- Adjust the budget card border/styling based on mode and usage:
+  - **Guided**: Orange border + warning icon when usage > 80%
+  - **Strict**: Red border + pulse animation when over 100%; show a "LOCKED" badge if budget is over and strict mode prevents further spending
+- Show the mode badge on each card (small "Guided" or "Strict" pill)
 
-**File**: `src/components/mode/ModeToggle.tsx`
+### 5. `src/components/budget/BudgetHealthScore.tsx` -- Mode Label
 
-- Remove `hidden sm:inline` from the label spans so "Simple" and "AI Pro" are always visible
-- Adjust button padding slightly for mobile to accommodate text
+- Show the active mode name as a badge next to "Budget Health" title (e.g., "Strict Mode")
+- Adjust score color thresholds based on mode (strict mode is harder to get "Excellent")
 
----
+### 6. `src/components/dashboard/BudgetAlerts.tsx` -- Mode-Aware Alerts
 
-## 7. Export Button Label on Mobile
+- Adjust alert thresholds based on budget mode:
+  - **Flexible**: Only show alerts at 100% (over budget)
+  - **Guided**: Show at threshold (current behavior, default 80%)
+  - **Strict**: Show at 50% (early warning) and stronger language at 80%+
+- In strict mode, mark over-budget alerts as "VIOLATION" instead of just a warning
 
-**File**: `src/pages/Expenses.tsx`
+### 7. `src/pages/Budgets.tsx` -- Pass Mode Down
 
-- The Export Sheet button currently hides label text on mobile (only shows icon). Change to always show a short label:
-  - Show "Export" on mobile (instead of hidden)
-  - Show "Export Sheet" on desktop (keep as-is)
-
----
-
-## 8. Performance: Remove Duplicate Queries
-
-**Files**: `src/pages/Dashboard.tsx`, `src/components/dashboard/DashboardHeader.tsx`, `src/components/dashboard/StatCards.tsx`
-
-Both `DashboardHeader` and `StatCards` independently call `useExpenses`, `useCategories`, and `useAllEffectiveBudgets` with the same parameters. Since `Dashboard.tsx` already calls `useExpenses` and `useCategories`, refactor to pass data as props:
-
-- `Dashboard.tsx` becomes the single source: calls `useExpenses`, `useCategories`, and `useAllEffectiveBudgets`
-- Pass `expenses`, `categories`, and `effectiveBudgets` as props to `DashboardHeader`
-- Remove `StatCards` component entirely (its data is already shown in `DashboardHeader`'s stat cards). `StatCards` is not rendered anywhere in Dashboard currently anyway.
-- This eliminates 4 duplicate queries per page load
-
-Note: TanStack Query does deduplicate identical queries within the same render cycle, but having the data flow via props is cleaner architecture and prevents accidental mismatches.
-
----
-
-## 9. Performance: Reduce Google Fonts
-
-**File**: `src/index.css`
-
-- Remove unused font imports (lines 1-3, 5-6): Lato, EB Garamond, Fira Code, Lora, Space Mono
-- Keep only Inter (line 4) which is the actual app font
-- This eliminates 5 unnecessary network requests on page load
+- Pass `budgetMode` from financial settings to child components that need it
+- Show a colored banner at top of Budgets tab indicating active mode with description
 
 ---
 
-## 10. Import Select-All Batch Optimization
+## Technical Details
 
-**File**: `src/components/import/ImportWizardDialog.tsx`
+### No Database Changes Needed
+The `budget_mode` column already exists in `user_financial_settings` table and stores 'flexible', 'guided', or 'strict'.
 
-- Currently `handleSelectAll` calls `updateTransaction.mutate()` once per transaction in a loop, which fires N individual network requests
-- Replace with a single batch approach: collect all IDs, then call a single RPC or loop with Promise.all but with a debounce/batch
-- Since there's no batch RPC available, use `Promise.all` with the existing mutation but skip individual toasts, and only show one success/error at the end
-- Better approach: just update local state immediately (already done), and defer the DB sync to when the user proceeds to the next step (categorize/import), since the `handleImport` function already sends final selections
+### Data Flow
 
----
+The `useFinancialSettings` hook already returns `budget_mode`. Components will read it from there. The mode change in `FinancialSettingsCard` will auto-save (like the Smart Rules toggle) and invalidate the query, causing all components to re-render with the new mode.
 
-## Summary of Files
+### Files to Modify
+- `src/components/budget/FinancialSettingsCard.tsx` -- live preview + slider locking
+- `src/hooks/useBudgetRules.ts` -- mode-aware scoring and suggestions
+- `src/components/expenses/ExpenseFormDialog.tsx` -- enforce rules on submit
+- `src/components/categories/MonthlyBudgetEditor.tsx` -- visual mode feedback
+- `src/components/budget/BudgetHealthScore.tsx` -- mode badge + adjusted thresholds
+- `src/components/dashboard/BudgetAlerts.tsx` -- mode-aware alert thresholds
+- `src/pages/Budgets.tsx` -- mode banner + prop passing
 
-| # | Change | Files |
-|---|--------|-------|
-| 1 | Password reset flow | `Auth.tsx`, new `ResetPassword.tsx`, `App.tsx` |
-| 2 | Amount validation | `ExpenseFormDialog.tsx` |
-| 3 | Import close confirmation | `ImportWizardDialog.tsx` |
-| 4 | Dashboard add button | `Dashboard.tsx` |
-| 5 | Dashboard empty state | `Dashboard.tsx` |
-| 6 | Mode toggle labels | `ModeToggle.tsx` |
-| 7 | Export button label | `Expenses.tsx` |
-| 8 | Remove duplicate queries | `Dashboard.tsx`, `DashboardHeader.tsx` |
-| 9 | Remove unused fonts | `index.css` |
-| 10 | Batch select-all | `ImportWizardDialog.tsx` |
-
-No database migrations needed. No new dependencies.
-
+### No New Dependencies
+All changes use existing UI components (AlertDialog, Badge, toast, etc.).

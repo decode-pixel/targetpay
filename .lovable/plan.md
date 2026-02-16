@@ -1,102 +1,66 @@
 
-# Make Budget Mode (Flexible/Guided/Strict) Actually Work
 
-Currently, the Rule Enforcement setting (flexible/guided/strict) is stored in the database but has no effect on the app. Changing it does nothing visible. This plan makes each mode behave differently across the entire system with live preview.
+# Fix UI Reactivity: Instant Updates for Profile Save and Budget Mode
 
----
+## Problems Found
 
-## How Each Mode Will Behave
+1. **Profile Save**: The `useUpdateProfile` hook fires `invalidateQueries` without awaiting it, so the success toast appears before the UI actually refreshes with new data. The `hasChanges` flag also has a stale dependency in the `useEffect` sync.
 
-| Behavior | Flexible | Guided | Strict |
-|----------|----------|--------|--------|
-| Over-budget warning | None | Yellow warning banner | Red blocking alert |
-| Adding expense over budget | Always allowed | Allowed with warning toast | Requires "Override" confirmation |
-| Budget allocation sliders | Free adjustment | Soft warning if outside 50/30/20 | Locked to 50/30/20 ratios |
-| Health score deductions | Light (-5 per violation) | Medium (-10 per violation) | Heavy (-15 per violation) |
-| Suggestions tone | Tips only | Warnings + tips | Urgent warnings |
-| Budget card styling | Normal | Orange border when near limit | Red border + shake when over |
+2. **Budget Mode Selector**: The `useUpdateFinancialSettings` hook only invalidates `financial-settings` queries. It does NOT invalidate downstream queries that depend on settings (budget rules, category budgets, expenses). This means the dashboard, health score, alerts, and budget cards all show stale values until the user manually navigates away and back.
 
 ---
 
-## Changes by File
+## Fix 1: `src/hooks/useProfile.ts` -- Await Invalidation, Then Toast
 
-### 1. `src/components/budget/FinancialSettingsCard.tsx` -- Live Preview on Mode Change
+Change `onSuccess` to an async function that awaits `invalidateQueries` before showing the toast:
 
-- When user clicks Flexible/Guided/Strict, immediately show a **live preview card** below the selector showing:
-  - Mode name with icon
-  - 3-4 bullet points describing what this mode does
-  - Animated allocation bar showing Needs/Wants/Savings split
-- In **Strict** mode: lock the percentage sliders to fixed 50/30/20 values (disable sliders, auto-set values)
-- In **Guided** mode: show a warning badge if percentages deviate more than 10% from 50/30/20
-- In **Flexible** mode: no restrictions on sliders
-- Auto-save mode change immediately (like Smart Rules toggle already does)
+```typescript
+onSuccess: async () => {
+  await queryClient.invalidateQueries({ queryKey: ['profile'] });
+  toast.success('Profile updated');
+},
+```
 
-### 2. `src/hooks/useBudgetRules.ts` -- Mode-Aware Suggestions & Health Score
+This ensures the profile query refetches and updates the UI BEFORE the success message appears.
 
-- Import `budgetMode` from financial settings into the rules engine
-- Adjust health score deductions based on mode:
-  - Flexible: -5 per over-budget category
-  - Guided: -10 per over-budget category
-  - Strict: -15 per over-budget category
-- Adjust suggestion severity based on mode:
-  - Flexible: only show at 90% and 100% thresholds
-  - Guided: show at 70%, 90%, 100% (current behavior)
-  - Strict: show at 50%, 70%, 90%, 100% -- with stronger wording
-- Add a new suggestion type for strict mode: "Budget violation" (instead of just "warning")
+## Fix 2: `src/pages/Profile.tsx` -- Reset hasChanges Properly
 
-### 3. `src/components/expenses/ExpenseFormDialog.tsx` -- Enforce Rules on Expense Entry
+The `useEffect` that syncs `fullName` from profile data skips when `hasChanges` is true, but after a successful save `hasChanges` is reset in `handleSave` -- however the timing can race. Fix by resetting `hasChanges` inside `onSuccess` of the mutation, or by using `onSettled`. The current approach in `handleSave` already resets it after `mutateAsync`, which is correct since `mutateAsync` awaits. No change needed here once the hook awaits properly.
 
-- Fetch financial settings and category budgets
-- After user fills amount and selects category, check if this expense would exceed the category budget:
-  - **Flexible**: No check, submit normally
-  - **Guided**: Show a yellow warning toast ("This will exceed your Food budget by X") but allow submission
-  - **Strict**: Show a confirmation AlertDialog: "This expense exceeds your budget by X. Are you sure you want to override?" with "Cancel" and "Override & Save" buttons
+## Fix 3: `src/hooks/useFinancialSettings.ts` -- Invalidate All Dependent Queries
 
-### 4. `src/components/categories/MonthlyBudgetEditor.tsx` -- Visual Mode Feedback
+Change `onSuccess` in `useUpdateFinancialSettings` to await invalidation of ALL dependent query keys:
 
-- Accept `budgetMode` as a prop (or fetch from settings)
-- Adjust the budget card border/styling based on mode and usage:
-  - **Guided**: Orange border + warning icon when usage > 80%
-  - **Strict**: Red border + pulse animation when over 100%; show a "LOCKED" badge if budget is over and strict mode prevents further spending
-- Show the mode badge on each card (small "Guided" or "Strict" pill)
+```typescript
+onSuccess: async () => {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['financial-settings'] }),
+    queryClient.invalidateQueries({ queryKey: ['categories'] }),
+    queryClient.invalidateQueries({ queryKey: ['expenses'] }),
+    queryClient.invalidateQueries({ queryKey: ['category-budgets'] }),
+  ]);
+  toast.success('Settings saved');
+},
+```
 
-### 5. `src/components/budget/BudgetHealthScore.tsx` -- Mode Label
+This ensures that when the user switches between Flexible/Guided/Strict:
+- Budget health score recalculates immediately
+- Budget alerts update thresholds instantly
+- Category budget cards re-render with correct styling
+- Dashboard stat cards reflect the new mode
 
-- Show the active mode name as a badge next to "Budget Health" title (e.g., "Strict Mode")
-- Adjust score color thresholds based on mode (strict mode is harder to get "Excellent")
+## Fix 4: `src/components/budget/FinancialSettingsCard.tsx` -- Optimistic Local State
 
-### 6. `src/components/dashboard/BudgetAlerts.tsx` -- Mode-Aware Alerts
-
-- Adjust alert thresholds based on budget mode:
-  - **Flexible**: Only show alerts at 100% (over budget)
-  - **Guided**: Show at threshold (current behavior, default 80%)
-  - **Strict**: Show at 50% (early warning) and stronger language at 80%+
-- In strict mode, mark over-budget alerts as "VIOLATION" instead of just a warning
-
-### 7. `src/pages/Budgets.tsx` -- Pass Mode Down
-
-- Pass `budgetMode` from financial settings to child components that need it
-- Show a colored banner at top of Budgets tab indicating active mode with description
+The `handleModeChange` function already updates local state (`setBudgetMode`) before calling `mutateAsync`, which is correct for instant visual feedback on the live preview card. No change needed here -- the fix is in the hook's `onSuccess` propagating changes to other components.
 
 ---
 
-## Technical Details
+## Summary of File Changes
 
-### No Database Changes Needed
-The `budget_mode` column already exists in `user_financial_settings` table and stores 'flexible', 'guided', or 'strict'.
+| File | Change |
+|------|--------|
+| `src/hooks/useProfile.ts` | Await `invalidateQueries` before toast in `onSuccess` |
+| `src/hooks/useFinancialSettings.ts` | Await invalidation of `financial-settings`, `categories`, `expenses`, `category-budgets` in `onSuccess` |
 
-### Data Flow
+Two files modified. No new files. No database changes. No new dependencies.
 
-The `useFinancialSettings` hook already returns `budget_mode`. Components will read it from there. The mode change in `FinancialSettingsCard` will auto-save (like the Smart Rules toggle) and invalidate the query, causing all components to re-render with the new mode.
-
-### Files to Modify
-- `src/components/budget/FinancialSettingsCard.tsx` -- live preview + slider locking
-- `src/hooks/useBudgetRules.ts` -- mode-aware scoring and suggestions
-- `src/components/expenses/ExpenseFormDialog.tsx` -- enforce rules on submit
-- `src/components/categories/MonthlyBudgetEditor.tsx` -- visual mode feedback
-- `src/components/budget/BudgetHealthScore.tsx` -- mode badge + adjusted thresholds
-- `src/components/dashboard/BudgetAlerts.tsx` -- mode-aware alert thresholds
-- `src/pages/Budgets.tsx` -- mode banner + prop passing
-
-### No New Dependencies
-All changes use existing UI components (AlertDialog, Badge, toast, etc.).

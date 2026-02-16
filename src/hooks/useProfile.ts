@@ -80,8 +80,8 @@ export function useUpdateProfile() {
       if (error) throw error;
       return data as Profile;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['profile'] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['profile'] });
       toast.success('Profile updated');
     },
     onError: (error) => {

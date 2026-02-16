@@ -12,6 +12,10 @@ import {
 import {
   Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle,
 } from '@/components/ui/drawer';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import StatementUploader from './StatementUploader';
 import TransactionPreview from './TransactionPreview';
 import MonthGroupedPreview from './MonthGroupedPreview';
@@ -80,6 +84,7 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusText, setStatusText] = useState('');
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: categories = [] } = useCategories();
@@ -313,9 +318,9 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
   localTransactionsRef.current = localTransactions;
 
   const handleSelectAll = useCallback((selected: boolean) => {
+    // Update local state immediately; DB sync deferred to final import step
     setLocalTransactions(prev => prev.map(t => ({ ...t, is_selected: selected })));
-    localTransactionsRef.current.forEach(t => updateTransaction.mutate({ id: t.id, is_selected: selected } as any));
-  }, [updateTransaction]);
+  }, []);
 
   const selectedCount = localTransactions.filter(t => t.is_selected).length;
   const currentStepIndex = STEPS.findIndex(s => s.key === step);
@@ -470,35 +475,66 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
     </>
   );
 
+  const handleOpenChange = (isOpen: boolean) => {
+    if (!isOpen && wizardState !== 'idle' && wizardState !== 'error') {
+      setShowCloseConfirm(true);
+    } else if (!isOpen) {
+      if (wizardState === 'error' && importId) {
+        deleteImport.mutateAsync(importId).catch(() => {});
+      }
+      resetWizard();
+      onOpenChange(false);
+    } else {
+      onOpenChange(isOpen);
+    }
+  };
+
+  const closeConfirmDialog = (
+    <AlertDialog open={showCloseConfirm} onOpenChange={setShowCloseConfirm}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Close import?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Import is in progress. Are you sure you want to close? Unsaved data will be lost.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Continue Import</AlertDialogCancel>
+          <AlertDialogAction onClick={handleCancel}>Close & Discard</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
   if (isMobile) {
     return (
-      <Drawer open={open} onOpenChange={(isOpen) => {
-        if (!isOpen && wizardState !== 'idle') handleCancel();
-        else onOpenChange(isOpen);
-      }}>
-        <DrawerContent className="max-h-[95vh] flex flex-col">
-          <DrawerHeader className="text-left">
-            <DrawerTitle>Import Bank Statement</DrawerTitle>
-            <DrawerDescription>Upload to extract and categorize expenses</DrawerDescription>
-          </DrawerHeader>
-          <div className="flex-1 overflow-y-auto px-4 pb-4">{content}</div>
-        </DrawerContent>
-      </Drawer>
+      <>
+        {closeConfirmDialog}
+        <Drawer open={open} onOpenChange={handleOpenChange}>
+          <DrawerContent className="max-h-[95vh] flex flex-col">
+            <DrawerHeader className="text-left">
+              <DrawerTitle>Import Bank Statement</DrawerTitle>
+              <DrawerDescription>Upload to extract and categorize expenses</DrawerDescription>
+            </DrawerHeader>
+            <div className="flex-1 overflow-y-auto px-4 pb-4">{content}</div>
+          </DrawerContent>
+        </Drawer>
+      </>
     );
   }
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => {
-      if (!isOpen && wizardState !== 'idle') handleCancel();
-      else onOpenChange(isOpen);
-    }}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <DialogTitle>Import Bank Statement</DialogTitle>
-          <DialogDescription>Upload your bank statement to automatically extract and categorize expenses</DialogDescription>
-        </DialogHeader>
-        {content}
-      </DialogContent>
-    </Dialog>
+    <>
+      {closeConfirmDialog}
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Import Bank Statement</DialogTitle>
+            <DialogDescription>Upload your bank statement to automatically extract and categorize expenses</DialogDescription>
+          </DialogHeader>
+          {content}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

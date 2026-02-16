@@ -23,7 +23,7 @@ export default function ModeToggle() {
         )}
       >
         <LayoutGrid className="h-3 w-3" />
-        <span className="hidden sm:inline">Simple</span>
+        <span>Simple</span>
       </button>
       
       <button
@@ -34,7 +34,7 @@ export default function ModeToggle() {
         )}
       >
         <Sparkles className="h-3 w-3" />
-        <span className="hidden sm:inline">AI Pro</span>
+        <span>AI Pro</span>
       </button>
     </div>
   );

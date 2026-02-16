@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { format } from 'date-fns';
-import { Plus, Loader2, Sparkles } from 'lucide-react';
+import { Plus, Loader2, Sparkles, Receipt } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import AppLayout from '@/components/layout/AppLayout';
+import FloatingAddButton from '@/components/layout/FloatingAddButton';
 import DashboardHeader from '@/components/dashboard/DashboardHeader';
 import CategoryPieChart from '@/components/dashboard/CategoryPieChart';
 import CategoryBarChart from '@/components/dashboard/CategoryBarChart';
@@ -13,22 +14,25 @@ import ExpenseList from '@/components/expenses/ExpenseList';
 import ExpenseFormDialog from '@/components/expenses/ExpenseFormDialog';
 import { useExpenses } from '@/hooks/useExpenses';
 import { useCategories } from '@/hooks/useCategories';
+import { useAllEffectiveBudgets } from '@/hooks/useCategoryBudgets';
 import { Expense } from '@/types/expense';
 import { useAuth } from '@/contexts/AuthContext';
 import { useMode } from '@/contexts/ModeContext';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function Dashboard() {
   const { user, loading } = useAuth();
   const { isSimple, isAdvanced, setMode } = useMode();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
   const { data: expenses = [], isLoading } = useExpenses({ month: selectedMonth });
   const { data: categories = [] } = useCategories();
+  const { budgets: effectiveBudgets } = useAllEffectiveBudgets(selectedMonth, categories);
 
   const handleEditExpense = (expense: Expense) => {
     setEditingExpense(expense);
@@ -58,10 +62,13 @@ export default function Dashboard() {
   return (
     <AppLayout>
       <div className="space-y-4 md:space-y-6 animate-fade-in">
-        {/* Sticky Dashboard Header */}
+        {/* Sticky Dashboard Header - pass data as props */}
         <DashboardHeader 
           selectedMonth={selectedMonth} 
-          onMonthChange={setSelectedMonth} 
+          onMonthChange={setSelectedMonth}
+          expenses={expenses}
+          categories={categories}
+          effectiveBudgets={effectiveBudgets}
         />
 
         {/* Budget Alerts */}
@@ -87,13 +94,25 @@ export default function Dashboard() {
             <CardTitle className="text-base md:text-lg">
               Recent Expenses
             </CardTitle>
-            <Button 
-              variant="ghost" 
-              size="sm"
-              onClick={() => navigate('/expenses')}
-            >
-              View all
-            </Button>
+            <div className="flex items-center gap-2">
+              {!isMobile && (
+                <Button 
+                  size="sm"
+                  onClick={() => setExpenseDialogOpen(true)}
+                  className="gap-1"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add
+                </Button>
+              )}
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => navigate('/expenses')}
+              >
+                View all
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="pt-0 px-3 md:px-6">
             {isLoading ? (
@@ -101,8 +120,12 @@ export default function Dashboard() {
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
             ) : expenses.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground text-sm">
-                No expenses this month
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <div className="h-14 w-14 rounded-full bg-muted/60 flex items-center justify-center mb-3">
+                  <Receipt className="h-7 w-7 text-muted-foreground" />
+                </div>
+                <p className="font-medium text-sm text-foreground">No expenses this month</p>
+                <p className="text-xs text-muted-foreground mt-1">Tap + to add your first expense</p>
               </div>
             ) : (
               <ExpenseList 
@@ -136,6 +159,11 @@ export default function Dashboard() {
           </Card>
         )}
       </div>
+
+      {/* Floating Add Button (mobile) */}
+      {isMobile && (
+        <FloatingAddButton onClick={() => setExpenseDialogOpen(true)} />
+      )}
 
       {/* Expense Form Dialog */}
       <ExpenseFormDialog

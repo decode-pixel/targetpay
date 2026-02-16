@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -25,6 +26,7 @@ export default function Auth() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [resetSent, setResetSent] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -173,6 +175,33 @@ export default function Auth() {
                     </div>
                     {errors.password && <p className="text-sm text-destructive">{errors.password}</p>}
                   </div>
+                  <button
+                    type="button"
+                    className="text-xs text-primary hover:underline self-end"
+                    onClick={async () => {
+                      if (!email || !z.string().email().safeParse(email).success) {
+                        toast.error('Please enter a valid email address first');
+                        return;
+                      }
+                      setIsLoading(true);
+                      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                        redirectTo: `${window.location.origin}/reset-password`,
+                      });
+                      setIsLoading(false);
+                      if (error) {
+                        toast.error(error.message);
+                      } else {
+                        setResetSent(true);
+                        toast.success('Check your email for a password reset link');
+                      }
+                    }}
+                    disabled={isLoading}
+                  >
+                    Forgot Password?
+                  </button>
+                  {resetSent && (
+                    <p className="text-xs text-success">Reset link sent! Check your inbox.</p>
+                  )}
                 </CardContent>
                 <CardFooter className="flex flex-col gap-4">
                   <Button type="submit" className="w-full" disabled={isLoading}>

@@ -128,7 +128,7 @@ export default function Auth() {
       <div className="w-full max-w-md animate-fade-in">
         {/* Logo */}
         <div className="text-center mb-8">
-          <img src={appLogo} alt="TargetPay" className="w-16 h-16 rounded-2xl mx-auto mb-4" />
+          <img src="/logo.png" alt="TargetPay" className="w-16 h-16 rounded-2xl mx-auto mb-4" fetchPriority="high" />
           <h1 className="text-2xl font-bold text-foreground">TargetPay</h1>
           <p className="text-muted-foreground mt-1">Track your expenses smartly</p>
         </div>

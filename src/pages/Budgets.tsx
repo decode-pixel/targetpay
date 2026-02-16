@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { Loader2, Calendar, Info, Settings, Zap, ZapOff, Plus } from 'lucide-react';
+import { Loader2, Calendar, Info, Settings, Zap, ZapOff, Plus, Shield, Lock, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AppLayout from '@/components/layout/AppLayout';
 import MonthYearPicker from '@/components/dashboard/MonthYearPicker';
@@ -25,6 +25,29 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Category } from '@/types/expense';
+import { BudgetMode } from '@/types/budget';
+import { cn } from '@/lib/utils';
+
+const MODE_BANNER: Record<BudgetMode, { icon: React.ReactNode; color: string; bg: string; description: string }> = {
+  flexible: {
+    icon: <CheckCircle2 className="h-4 w-4" />,
+    color: 'text-green-600 dark:text-green-400',
+    bg: 'bg-green-500/10 border-green-500/30',
+    description: 'No restrictions — tips and suggestions only',
+  },
+  guided: {
+    icon: <Shield className="h-4 w-4" />,
+    color: 'text-yellow-600 dark:text-yellow-400',
+    bg: 'bg-yellow-500/10 border-yellow-500/30',
+    description: 'Warnings shown when budget rules are violated',
+  },
+  strict: {
+    icon: <Lock className="h-4 w-4" />,
+    color: 'text-red-600 dark:text-red-400',
+    bg: 'bg-red-500/10 border-red-500/30',
+    description: 'Override required for over-budget spending, allocation locked to 50/30/20',
+  },
+};
 
 export default function Budgets() {
   const { user, loading } = useAuth();
@@ -38,7 +61,7 @@ export default function Budgets() {
   const { data: categories = [], isLoading: categoriesLoading } = useCategories();
   const { data: expenses = [], isLoading: expensesLoading } = useExpenses({ month: selectedMonth });
   const { data: financialSettings } = useFinancialSettings();
-  const { healthMetrics, suggestions, categoryDetails } = useBudgetRules({ month: selectedMonth });
+  const { healthMetrics, suggestions, categoryDetails, budgetMode } = useBudgetRules({ month: selectedMonth });
 
   const smartRulesEnabled = isAdvanced && (financialSettings?.smart_rules_enabled ?? true);
 
@@ -77,6 +100,7 @@ export default function Budgets() {
 
   const isLoading = categoriesLoading || expensesLoading;
   const monthLabel = format(new Date(`${selectedMonth}-01`), 'MMMM yyyy');
+  const banner = MODE_BANNER[budgetMode];
 
   return (
     <AppLayout>
@@ -112,8 +136,21 @@ export default function Budgets() {
           <MonthYearPicker value={selectedMonth} onChange={setSelectedMonth} />
         </div>
 
+        {/* Mode Banner - shown in advanced mode with smart rules */}
+        {isAdvanced && smartRulesEnabled && (
+          <Alert className={cn('border', banner.bg)}>
+            <div className={cn('flex items-center gap-2', banner.color)}>
+              {banner.icon}
+              <span className="font-semibold capitalize">{budgetMode} Mode</span>
+            </div>
+            <AlertDescription className="text-xs mt-1">
+              {banner.description}
+            </AlertDescription>
+          </Alert>
+        )}
+
         {isSimple ? (
-          /* Simple Mode: Just budget cards and summary, no tabs */
+          /* Simple Mode */
           <div className="space-y-4">
             <Alert className="bg-primary/5 border-primary/20">
               <Info className="h-4 w-4" />
@@ -192,7 +229,7 @@ export default function Budgets() {
             )}
           </div>
         ) : (
-          /* Advanced Mode: Full tabs with all features */
+          /* Advanced Mode */
           <Tabs defaultValue="budgets" className="space-y-4">
             <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="budgets">Budgets</TabsTrigger>
@@ -203,7 +240,7 @@ export default function Budgets() {
             <TabsContent value="budgets" className="space-y-4">
               {smartRulesEnabled && !isLoading && categories.length > 0 && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <BudgetHealthScore metrics={healthMetrics} />
+                  <BudgetHealthScore metrics={healthMetrics} budgetMode={budgetMode} />
                   <BudgetSuggestions suggestions={suggestions} month={selectedMonth} />
                 </div>
               )}

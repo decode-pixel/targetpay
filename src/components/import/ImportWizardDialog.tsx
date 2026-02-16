@@ -309,10 +309,13 @@ export default function ImportWizardDialog({ open, onOpenChange }: ImportWizardD
     updateTransaction.mutate({ id, is_selected: selected } as any);
   }, [updateTransaction]);
 
+  const localTransactionsRef = useRef(localTransactions);
+  localTransactionsRef.current = localTransactions;
+
   const handleSelectAll = useCallback((selected: boolean) => {
     setLocalTransactions(prev => prev.map(t => ({ ...t, is_selected: selected })));
-    localTransactions.forEach(t => updateTransaction.mutate({ id: t.id, is_selected: selected } as any));
-  }, [localTransactions, updateTransaction]);
+    localTransactionsRef.current.forEach(t => updateTransaction.mutate({ id: t.id, is_selected: selected } as any));
+  }, [updateTransaction]);
 
   const selectedCount = localTransactions.filter(t => t.is_selected).length;
   const currentStepIndex = STEPS.findIndex(s => s.key === step);

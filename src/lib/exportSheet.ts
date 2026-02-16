@@ -64,10 +64,11 @@ export function exportMonthlyReport(
   sorted.forEach((e) => {
     const amt = Number(e.amount);
     runningBalance += amt;
+    const catName = e.category?.name || 'Uncategorized';
     rows.push([
       format(new Date(e.date), 'dd/MM/yyyy'),
-      e.note || '-',
-      e.category?.name || 'Uncategorized',
+      e.note ? `${e.note} (${catName})` : catName,
+      catName,
       amt,
       null,
       runningBalance,
@@ -104,7 +105,7 @@ export function exportMonthlyReport(
   ];
 
   // Freeze panes: freeze at the transaction header row
-  ws['!freeze'] = { xSplit: 0, ySplit: tableHeaderRow + 1 };
+  ws['!views'] = [{ state: 'frozen', ySplit: tableHeaderRow + 1, xSplit: 0 }];
 
   // Bold styling for key cells (SheetJS community edition has limited style support,
   // but we can set cell types for number formatting)

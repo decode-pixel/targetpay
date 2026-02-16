@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { Plus, Loader2, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -39,6 +39,12 @@ export default function Dashboard() {
     navigate(`/expenses?category=${categoryId}`);
   };
 
+  useEffect(() => {
+    if (!loading && !user) {
+      navigate('/auth');
+    }
+  }, [user, loading, navigate]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -47,10 +53,7 @@ export default function Dashboard() {
     );
   }
 
-  if (!user) {
-    navigate('/auth');
-    return null;
-  }
+  if (!user) return null;
 
   return (
     <AppLayout>

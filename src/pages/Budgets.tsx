@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { Loader2, Calendar, Info, Settings, Zap, ZapOff, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -59,6 +59,12 @@ export default function Budgets() {
     setCategoryDialogOpen(true);
   };
 
+  useEffect(() => {
+    if (!loading && !user) {
+      navigate('/auth');
+    }
+  }, [user, loading, navigate]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -67,10 +73,7 @@ export default function Budgets() {
     );
   }
 
-  if (!user) {
-    navigate('/auth');
-    return null;
-  }
+  if (!user) return null;
 
   const isLoading = categoriesLoading || expensesLoading;
   const monthLabel = format(new Date(`${selectedMonth}-01`), 'MMMM yyyy');

@@ -4,6 +4,7 @@ import { TrendingDown, Wallet, PiggyBank } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { useExpenses } from '@/hooks/useExpenses';
 import { useCategories } from '@/hooks/useCategories';
+import { useAllEffectiveBudgets } from '@/hooks/useCategoryBudgets';
 import { cn } from '@/lib/utils';
 import MonthYearPicker from './MonthYearPicker';
 
@@ -15,10 +16,14 @@ interface DashboardHeaderProps {
 export default function DashboardHeader({ selectedMonth, onMonthChange }: DashboardHeaderProps) {
   const { data: expenses = [] } = useExpenses({ month: selectedMonth });
   const { data: categories = [] } = useCategories();
+  const { budgets: effectiveBudgets } = useAllEffectiveBudgets(selectedMonth, categories);
 
   const stats = useMemo(() => {
     const totalExpense = expenses.reduce((sum, exp) => sum + Number(exp.amount), 0);
-    const totalBudget = categories.reduce((sum, cat) => sum + (Number(cat.monthly_budget) || 0), 0);
+    let totalBudget = 0;
+    categories.forEach(cat => {
+      totalBudget += effectiveBudgets.get(cat.id) || 0;
+    });
     const remainingBudget = totalBudget - totalExpense;
     const budgetPercentage = totalBudget > 0 ? (totalExpense / totalBudget) * 100 : 0;
 
@@ -29,7 +34,7 @@ export default function DashboardHeader({ selectedMonth, onMonthChange }: Dashbo
       budgetPercentage,
       transactionCount: expenses.length,
     };
-  }, [expenses, categories]);
+  }, [expenses, categories, effectiveBudgets]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {

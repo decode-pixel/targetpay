@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Loader2, Camera, Save, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -26,15 +26,11 @@ export default function Profile() {
   const [hasChanges, setHasChanges] = useState(false);
 
   // Sync state with profile data
-  useState(() => {
-    if (profile) {
+  useEffect(() => {
+    if (profile && !hasChanges) {
       setFullName(profile.full_name || '');
     }
-  });
-
-  if (profile && !hasChanges && fullName !== (profile.full_name || '')) {
-    setFullName(profile.full_name || '');
-  }
+  }, [profile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleNameChange = (value: string) => {
     setFullName(value);
@@ -91,6 +87,12 @@ export default function Profile() {
     navigate('/auth');
   };
 
+  useEffect(() => {
+    if (!authLoading && !profileLoading && !user) {
+      navigate('/auth');
+    }
+  }, [user, authLoading, profileLoading, navigate]);
+
   if (authLoading || profileLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -99,10 +101,7 @@ export default function Profile() {
     );
   }
 
-  if (!user) {
-    navigate('/auth');
-    return null;
-  }
+  if (!user) return null;
 
   const userInitials = profile?.full_name
     ? profile.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)

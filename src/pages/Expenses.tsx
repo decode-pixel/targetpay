@@ -87,6 +87,12 @@ export default function Expenses() {
     }).format(amount);
   };
 
+  useEffect(() => {
+    if (!loading && !user) {
+      navigate('/auth');
+    }
+  }, [user, loading, navigate]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -95,10 +101,7 @@ export default function Expenses() {
     );
   }
 
-  if (!user) {
-    navigate('/auth');
-    return null;
-  }
+  if (!user) return null;
 
   return (
     <AppLayout>

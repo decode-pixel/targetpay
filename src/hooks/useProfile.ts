@@ -57,7 +57,8 @@ export function useProfile() {
       return data as Profile;
     },
     enabled: !!user,
-    staleTime: 30 * 60 * 1000, // 30 minutes - refresh signed URL periodically
+    staleTime: 15 * 60 * 1000, // 15 minutes - refresh signed URL before 1hr expiry
+    refetchOnWindowFocus: true,
   });
 }
 

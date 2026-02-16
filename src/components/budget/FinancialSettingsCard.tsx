@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Settings, IndianRupee, Percent, Shield, Zap, ZapOff } from 'lucide-react';
+import { Save, Settings, IndianRupee, Percent, Shield, Zap, ZapOff, Lock, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -7,6 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import {
   Select,
   SelectContent,
@@ -21,6 +22,51 @@ import { cn } from '@/lib/utils';
 interface FinancialSettingsCardProps {
   className?: string;
 }
+
+const MODE_CONFIG: Record<BudgetMode, {
+  icon: React.ReactNode;
+  color: string;
+  bgColor: string;
+  borderColor: string;
+  bullets: string[];
+}> = {
+  flexible: {
+    icon: <CheckCircle2 className="h-5 w-5 text-green-500" />,
+    color: 'text-green-600 dark:text-green-400',
+    bgColor: 'bg-green-500/10',
+    borderColor: 'border-green-500/30',
+    bullets: [
+      'No restrictions on spending',
+      'Tips shown at 90% and 100% usage',
+      'Free adjustment of budget allocation',
+      'Light health score impact (-5 per violation)',
+    ],
+  },
+  guided: {
+    icon: <AlertTriangle className="h-5 w-5 text-yellow-500" />,
+    color: 'text-yellow-600 dark:text-yellow-400',
+    bgColor: 'bg-yellow-500/10',
+    borderColor: 'border-yellow-500/30',
+    bullets: [
+      'Warnings when exceeding category budgets',
+      'Alerts at 70%, 90%, and 100% thresholds',
+      'Soft warning if allocation deviates from 50/30/20',
+      'Medium health score impact (-10 per violation)',
+    ],
+  },
+  strict: {
+    icon: <Lock className="h-5 w-5 text-red-500" />,
+    color: 'text-red-600 dark:text-red-400',
+    bgColor: 'bg-red-500/10',
+    borderColor: 'border-red-500/30',
+    bullets: [
+      'Override confirmation required for over-budget expenses',
+      'Alerts start at 50% usage with strong warnings',
+      'Allocation locked to 50/30/20 rule',
+      'Heavy health score impact (-15 per violation)',
+    ],
+  },
+};
 
 export default function FinancialSettingsCard({ className }: FinancialSettingsCardProps) {
   const { data: settings, isLoading } = useFinancialSettings();
@@ -47,14 +93,49 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
     }
   }, [settings]);
 
+  const isStrict = budgetMode === 'strict';
+  const isGuided = budgetMode === 'guided';
+
+  // Check if allocation deviates from 50/30/20
+  const allocationDeviation = Math.abs(needsPercent - 50) + Math.abs(wantsPercent - 30) + Math.abs(savingsPercent - 20);
+  const showGuidedWarning = isGuided && allocationDeviation > 20; // >10% deviation on any
+
   const handleIncomeChange = (value: string) => {
     setIncome(value);
     setHasChanges(true);
   };
 
+  const handleModeChange = async (mode: BudgetMode) => {
+    setBudgetMode(mode);
+    
+    let newNeeds = needsPercent;
+    let newWants = wantsPercent;
+    let newSavings = savingsPercent;
+    
+    // In strict mode, lock to 50/30/20
+    if (mode === 'strict') {
+      newNeeds = 50;
+      newWants = 30;
+      newSavings = 20;
+      setNeedsPercent(50);
+      setWantsPercent(30);
+      setSavingsPercent(20);
+    }
+    
+    // Auto-save immediately
+    await updateSettings.mutateAsync({
+      monthly_income: income ? parseFloat(income) : null,
+      budget_mode: mode,
+      needs_percentage: newNeeds,
+      wants_percentage: newWants,
+      savings_percentage: newSavings,
+      show_budget_suggestions: showSuggestions,
+      smart_rules_enabled: smartRulesEnabled,
+    });
+  };
+
   const handleSmartRulesToggle = async (enabled: boolean) => {
     setSmartRulesEnabled(enabled);
-    // Auto-save immediately for instant feedback
     await updateSettings.mutateAsync({
       monthly_income: income ? parseFloat(income) : null,
       budget_mode: budgetMode,
@@ -67,12 +148,12 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
   };
 
   const handlePercentageChange = (type: 'needs' | 'wants' | 'savings', value: number) => {
-    // Ensure total adds up to 100
+    if (isStrict) return; // Locked in strict mode
+    
     const remaining = 100 - value;
     
     if (type === 'needs') {
       setNeedsPercent(value);
-      // Distribute remaining between wants and savings proportionally
       const ratio = wantsPercent / (wantsPercent + savingsPercent) || 0.6;
       setWantsPercent(Math.round(remaining * ratio));
       setSavingsPercent(Math.round(remaining * (1 - ratio)));
@@ -113,6 +194,7 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
   };
 
   const incomeValue = parseFloat(income) || 0;
+  const modeConfig = MODE_CONFIG[budgetMode];
 
   if (isLoading) {
     return (
@@ -136,7 +218,7 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Smart Budget Rules Toggle - MAIN TOGGLE */}
+        {/* Smart Budget Rules Toggle */}
         <div className="p-4 rounded-xl border-2 border-primary/20 bg-primary/5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -167,7 +249,6 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
             />
           </div>
           
-          {/* Mode explanation */}
           <div className="mt-3 pt-3 border-t border-primary/20">
             {smartRulesEnabled ? (
               <ul className="text-xs text-muted-foreground space-y-1">
@@ -177,7 +258,7 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  Smart alerts at 70%, 90%, 100% usage
+                  Smart alerts at configurable thresholds
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="h-1.5 w-1.5 rounded-full bg-primary" />
@@ -207,7 +288,7 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
           </div>
         </div>
 
-        {/* Monthly Income - Show always */}
+        {/* Monthly Income */}
         <div className="space-y-2">
           <Label htmlFor="income" className="flex items-center gap-2">
             <IndianRupee className="h-3.5 w-3.5" />
@@ -228,7 +309,7 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
           </p>
         </div>
 
-        {/* Advanced settings - only show when smart rules enabled */}
+        {/* Advanced settings */}
         {smartRulesEnabled && (
           <>
             {/* Budget Mode */}
@@ -239,7 +320,7 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
               </Label>
               <Select 
                 value={budgetMode} 
-                onValueChange={(v) => { setBudgetMode(v as BudgetMode); setHasChanges(true); }}
+                onValueChange={(v) => handleModeChange(v as BudgetMode)}
               >
                 <SelectTrigger className="h-11">
                   <SelectValue />
@@ -267,13 +348,86 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
               </Select>
             </div>
 
+            {/* Live Preview Card */}
+            <div className={cn(
+              'rounded-xl border-2 p-4 space-y-3 transition-all duration-300',
+              modeConfig.borderColor,
+              modeConfig.bgColor,
+            )}>
+              <div className="flex items-center gap-2">
+                {modeConfig.icon}
+                <span className={cn('font-semibold capitalize', modeConfig.color)}>
+                  {budgetMode} Mode
+                </span>
+                <Badge variant="outline" className={cn('ml-auto text-xs', modeConfig.color)}>
+                  Active
+                </Badge>
+              </div>
+              <ul className="text-xs text-muted-foreground space-y-1.5">
+                {modeConfig.bullets.map((bullet, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <span className={cn(
+                      'h-1.5 w-1.5 rounded-full mt-1 shrink-0',
+                      budgetMode === 'flexible' ? 'bg-green-500' :
+                      budgetMode === 'guided' ? 'bg-yellow-500' : 'bg-red-500'
+                    )} />
+                    {bullet}
+                  </li>
+                ))}
+              </ul>
+              
+              {/* Animated allocation bar */}
+              <div className="pt-2">
+                <p className="text-xs text-muted-foreground mb-1.5">Allocation Split</p>
+                <div className="h-3 rounded-full overflow-hidden flex">
+                  <div 
+                    className="bg-blue-500 transition-all duration-500 ease-out" 
+                    style={{ width: `${needsPercent}%` }}
+                    title={`Needs: ${needsPercent}%`}
+                  />
+                  <div 
+                    className="bg-amber-500 transition-all duration-500 ease-out" 
+                    style={{ width: `${wantsPercent}%` }}
+                    title={`Wants: ${wantsPercent}%`}
+                  />
+                  <div 
+                    className="bg-emerald-500 transition-all duration-500 ease-out" 
+                    style={{ width: `${savingsPercent}%` }}
+                    title={`Savings: ${savingsPercent}%`}
+                  />
+                </div>
+                <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
+                  <span>Needs {needsPercent}%</span>
+                  <span>Wants {wantsPercent}%</span>
+                  <span>Savings {savingsPercent}%</span>
+                </div>
+              </div>
+            </div>
+
             {/* Budget Allocation */}
             {incomeValue > 0 && (
               <div className="space-y-4 pt-2">
-                <Label className="flex items-center gap-2">
-                  <Percent className="h-3.5 w-3.5" />
-                  Budget Allocation (50/30/20 Rule)
-                </Label>
+                <div className="flex items-center justify-between">
+                  <Label className="flex items-center gap-2">
+                    <Percent className="h-3.5 w-3.5" />
+                    Budget Allocation (50/30/20 Rule)
+                  </Label>
+                  {isStrict && (
+                    <Badge variant="outline" className="text-xs text-red-500 border-red-500/30 gap-1">
+                      <Lock className="h-3 w-3" />
+                      Locked
+                    </Badge>
+                  )}
+                </div>
+
+                {showGuidedWarning && (
+                  <Alert className="border-yellow-500/50 bg-yellow-500/10">
+                    <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                    <AlertDescription className="text-xs">
+                      Your allocation deviates significantly from the recommended 50/30/20 rule.
+                    </AlertDescription>
+                  </Alert>
+                )}
                 
                 <div className="space-y-4">
                   <div className="space-y-2">
@@ -290,6 +444,7 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
                       min={20}
                       step={5}
                       className="py-2"
+                      disabled={isStrict}
                     />
                   </div>
                   
@@ -307,6 +462,7 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
                       min={10}
                       step={5}
                       className="py-2"
+                      disabled={isStrict}
                     />
                   </div>
                   
@@ -324,6 +480,7 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
                       min={5}
                       step={5}
                       className="py-2"
+                      disabled={isStrict}
                     />
                   </div>
                 </div>
@@ -343,7 +500,6 @@ export default function FinancialSettingsCard({ className }: FinancialSettingsCa
                 checked={showSuggestions}
                 onCheckedChange={async (v) => {
                   setShowSuggestions(v);
-                  // Auto-save immediately
                   await updateSettings.mutateAsync({
                     monthly_income: income ? parseFloat(income) : null,
                     budget_mode: budgetMode,

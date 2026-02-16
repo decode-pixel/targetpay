@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { format } from 'date-fns';
-import { Pencil, Check, X, RotateCcw, Calendar } from 'lucide-react';
+import { Pencil, Check, X, RotateCcw, Calendar, AlertTriangle, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
@@ -17,12 +17,14 @@ import {
   useDeleteCategoryBudget,
   useCategoryBudgets 
 } from '@/hooks/useCategoryBudgets';
+import { useFinancialSettings } from '@/hooks/useFinancialSettings';
 import DynamicIcon from '@/components/ui/DynamicIcon';
 import { cn } from '@/lib/utils';
+import { BudgetMode } from '@/types/budget';
 
 interface MonthlyBudgetEditorProps {
   category: Category;
-  month: string; // YYYY-MM format
+  month: string;
   spent: number;
 }
 
@@ -35,14 +37,16 @@ export default function MonthlyBudgetEditor({
   const [budgetValue, setBudgetValue] = useState('');
   
   const { data: monthBudgets = [] } = useCategoryBudgets(month);
+  const { data: financialSettings } = useFinancialSettings();
   const setBudgetMutation = useSetCategoryBudget();
   const deleteBudgetMutation = useDeleteCategoryBudget();
 
-  // Check if there's a month-specific budget
+  const budgetMode: BudgetMode = financialSettings?.budget_mode || 'flexible';
+  const smartRulesEnabled = financialSettings?.smart_rules_enabled ?? true;
+
   const monthSpecificBudget = monthBudgets.find(b => b.category_id === category.id);
   const hasMonthSpecificBudget = !!monthSpecificBudget;
   
-  // Get effective budget (month-specific or default)
   const effectiveBudget = hasMonthSpecificBudget 
     ? monthSpecificBudget.budget_amount 
     : (category.monthly_budget ?? 0);
@@ -50,8 +54,15 @@ export default function MonthlyBudgetEditor({
   const remaining = effectiveBudget - spent;
   const percentage = effectiveBudget > 0 ? (spent / effectiveBudget) * 100 : 0;
   const isOverBudget = percentage > 100;
+  const isNearLimit = percentage > 80;
 
   const monthLabel = format(new Date(`${month}-01`), 'MMMM yyyy');
+
+  // Mode-aware styling
+  const showModeEffects = smartRulesEnabled && budgetMode !== 'flexible';
+  const isGuidedWarning = showModeEffects && budgetMode === 'guided' && isNearLimit;
+  const isStrictViolation = showModeEffects && budgetMode === 'strict' && isOverBudget;
+  const isStrictWarning = showModeEffects && budgetMode === 'strict' && isNearLimit && !isOverBudget;
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -90,7 +101,14 @@ export default function MonthlyBudgetEditor({
   };
 
   return (
-    <div className="bg-card rounded-xl p-4 border border-border/50 space-y-3">
+    <div className={cn(
+      'bg-card rounded-xl p-4 border space-y-3 transition-all duration-300',
+      isStrictViolation 
+        ? 'border-destructive/60 bg-destructive/5 shadow-[0_0_0_1px_hsl(var(--destructive)/0.3)] animate-pulse' 
+        : isGuidedWarning || isStrictWarning
+          ? 'border-orange-500/50 bg-orange-500/5'
+          : 'border-border/50'
+    )}>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -121,6 +139,19 @@ export default function MonthlyBudgetEditor({
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
+              )}
+              {/* Mode badges */}
+              {isStrictViolation && (
+                <Badge variant="destructive" className="text-[10px] gap-0.5 px-1.5 py-0">
+                  <Lock className="h-2.5 w-2.5" />
+                  VIOLATION
+                </Badge>
+              )}
+              {(isGuidedWarning || isStrictWarning) && !isOverBudget && (
+                <Badge variant="outline" className="text-[10px] gap-0.5 px-1.5 py-0 border-orange-500/50 text-orange-600 dark:text-orange-400">
+                  <AlertTriangle className="h-2.5 w-2.5" />
+                  Warning
+                </Badge>
               )}
             </div>
             <p className="text-xs text-muted-foreground">
@@ -218,7 +249,8 @@ export default function MonthlyBudgetEditor({
                 value={Math.min(percentage, 100)}
                 className={cn(
                   "h-2",
-                  isOverBudget && "[&>div]:bg-destructive"
+                  isOverBudget && "[&>div]:bg-destructive",
+                  !isOverBudget && isNearLimit && showModeEffects && "[&>div]:bg-orange-500"
                 )}
               />
               <div className="flex justify-between text-xs text-muted-foreground">

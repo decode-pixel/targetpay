@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { PDFDocument } from "https://esm.sh/@cantoo/pdf-lib@1.17.1";
+import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.4.168";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -146,8 +147,28 @@ Return ONLY valid JSON, NO markdown fences, NO extra text:
 If no transactions found, return: {"error": "no_transactions", "transactions": []}
 Include both debit and credit transactions. Extract EVERY transaction — do not skip any.`;
 
-async function callAI(apiKey: string, pdfBase64: string, isChunk: boolean, retryCount = 0): Promise<any> {
-  const userMsg = isChunk 
+async function extractTextFromPDF(pdfBytes: Uint8Array): Promise<string> {
+  try {
+    const pdfData = new Uint8Array(pdfBytes);
+    const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+    let fullText = '';
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items.map((item: any) => item.str).join(' ');
+      fullText += pageText + '\n';
+    }
+
+    return fullText.trim();
+  } catch (err) {
+    console.error('[extractTextFromPDF] Error:', err);
+    throw new Error('Failed to extract text from PDF');
+  }
+}
+
+async function callAI(apiKey: string, pdfText: string, isChunk: boolean, retryCount = 0): Promise<any> {
+  const userMsg = isChunk
     ? 'Extract ALL transactions from this page/section of the bank statement. Return them as JSON.'
     : 'Extract all transactions from this bank statement PDF.';
 
@@ -156,22 +177,18 @@ async function callAI(apiKey: string, pdfBase64: string, isChunk: boolean, retry
   const timeoutId = setTimeout(() => controller.abort(), 120000);
 
   try {
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    const response = await fetch('https://api.bytez.com/models/v2/openai/gpt-4o', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': apiKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           {
             role: 'user',
-            content: [
-              { type: 'text', text: userMsg },
-              { type: 'image_url', image_url: { url: `data:application/pdf;base64,${pdfBase64}` } },
-            ],
+            content: `${userMsg}\n\n${pdfText}`,
           },
         ],
         temperature: 0.1,
@@ -185,15 +202,15 @@ async function callAI(apiKey: string, pdfBase64: string, isChunk: boolean, retry
     if (!response.ok) {
       const errText = await response.text().catch(() => 'Unknown');
       console.error(`[callAI] HTTP ${response.status}:`, errText);
-      
+
       // Retry on 429 (rate limit) up to 2 times with backoff
       if (response.status === 429 && retryCount < 2) {
         const waitMs = (retryCount + 1) * 5000;
         console.log(`[callAI] Rate limited, waiting ${waitMs}ms before retry ${retryCount + 1}`);
         await new Promise(r => setTimeout(r, waitMs));
-        return callAI(apiKey, pdfBase64, isChunk, retryCount + 1);
+        return callAI(apiKey, pdfText, isChunk, retryCount + 1);
       }
-      
+
       throw new Error(`AI_HTTP_${response.status}`);
     }
 
@@ -209,7 +226,7 @@ async function callAI(apiKey: string, pdfBase64: string, isChunk: boolean, retry
       // Retry timeout once
       if (retryCount < 1) {
         console.log('[callAI] Timeout, retrying...');
-        return callAI(apiKey, pdfBase64, isChunk, retryCount + 1);
+        return callAI(apiKey, pdfText, isChunk, retryCount + 1);
       }
       throw new Error('AI_TIMEOUT');
     }
@@ -335,8 +352,8 @@ serve(async (req) => {
       return json({ success: false, error: 'Duplicate statement detected' }, 409);
     }
 
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    if (!LOVABLE_API_KEY) {
+    const BYTEZ_API_KEY = Deno.env.get('BYTEZ_API_KEY');
+    if (!BYTEZ_API_KEY) {
       await updateStatus(supabase, importId, 'failed', { error_message: 'AI service not configured' });
       return json({ success: false, error: 'AI service not configured' }, 500);
     }
@@ -362,14 +379,14 @@ serve(async (req) => {
 
     if (totalPages <= PAGES_PER_CHUNK) {
       // Small PDF — single call
-      const b64 = base64Encode(pdfBytes);
-      if (b64.length > 20 * 1024 * 1024) {
-        await updateStatus(supabase, importId, 'failed', { error_message: 'File is too large for processing.' });
-        return json({ success: false, error: 'File too large' }, 400);
-      }
-
       try {
-        const parsed = await callAI(LOVABLE_API_KEY, b64, false);
+        const pdfText = await extractTextFromPDF(pdfBytes);
+        if (pdfText.length === 0) {
+          await updateStatus(supabase, importId, 'failed', { error_message: 'Could not extract text from PDF.' });
+          return json({ success: false, error: 'Could not extract text from PDF' }, 400);
+        }
+
+        const parsed = await callAI(BYTEZ_API_KEY, pdfText, false);
         bankName = parsed.bankName || null;
         periodStart = parsed.periodStart || null;
         periodEnd = parsed.periodEnd || null;
@@ -378,7 +395,7 @@ serve(async (req) => {
         console.error('[parse] AI error:', err.message);
         const is402 = err.message?.includes('AI_HTTP_402');
         const errorMsg = is402
-          ? 'AI processing credits are exhausted. Please try again later or contact support.'
+          ? 'AI service payment required. Please try again later or contact support.'
           : err.message?.includes('TIMEOUT')
             ? 'Processing timed out. Please try a smaller file.'
             : err.message?.includes('429')
@@ -396,9 +413,14 @@ serve(async (req) => {
       } catch (splitErr) {
         console.error('[parse] Failed to split PDF:', splitErr);
         // Fallback: try the whole file
-        const b64 = base64Encode(pdfBytes);
         try {
-          const parsed = await callAI(LOVABLE_API_KEY, b64, false);
+          const pdfText = await extractTextFromPDF(pdfBytes);
+          if (pdfText.length === 0) {
+            await updateStatus(supabase, importId, 'failed', { error_message: 'Could not extract text from PDF.' });
+            return json({ success: false, error: 'Could not extract text from PDF' }, 400);
+          }
+
+          const parsed = await callAI(BYTEZ_API_KEY, pdfText, false);
           bankName = parsed.bankName || null;
           periodStart = parsed.periodStart || null;
           periodEnd = parsed.periodEnd || null;
@@ -411,19 +433,24 @@ serve(async (req) => {
         }
       }
 
-      let creditExhausted = false;
+      let paymentRequired = false;
       for (let i = 0; i < chunks.length; i++) {
         console.log(`[parse] Processing chunk ${i + 1}/${chunks.length}`);
-        
+
         // Update status with progress
         await updateStatus(supabase, importId, 'processing', {
           error_message: `Processing page ${i * PAGES_PER_CHUNK + 1}-${Math.min((i + 1) * PAGES_PER_CHUNK, totalPages)} of ${totalPages}...`,
         });
 
-        const chunkB64 = base64Encode(chunks[i]);
         try {
-          const parsed = await callAI(LOVABLE_API_KEY, chunkB64, true);
-          
+          const chunkText = await extractTextFromPDF(chunks[i]);
+          if (chunkText.length === 0) {
+            console.log(`[parse] Chunk ${i + 1} has no extractable text, skipping`);
+            continue;
+          }
+
+          const parsed = await callAI(BYTEZ_API_KEY, chunkText, true);
+
           // Capture metadata from first chunk
           if (i === 0) {
             bankName = parsed.bankName || null;
@@ -431,30 +458,30 @@ serve(async (req) => {
           }
           // Update periodEnd from last chunk
           if (parsed.periodEnd) periodEnd = parsed.periodEnd;
-          
+
           const txs = parsed.transactions || [];
           console.log(`[parse] Chunk ${i + 1} extracted ${txs.length} transactions`);
           allTransactions.push(...txs);
         } catch (err: any) {
           console.error(`[parse] Chunk ${i + 1} failed:`, err.message);
-          // If AI credits are exhausted, abort immediately — no point processing remaining chunks
+          // If payment is required, abort immediately — no point processing remaining chunks
           if (err.message?.includes('AI_HTTP_402')) {
-            creditExhausted = true;
+            paymentRequired = true;
             break;
           }
-          // Continue with other chunks for non-credit errors
+          // Continue with other chunks for non-payment errors
           continue;
         }
-        
+
         // Small delay between chunks to avoid rate limiting
         if (i < chunks.length - 1) {
           await new Promise(r => setTimeout(r, 1000));
         }
       }
 
-      // If credits ran out and we got nothing, fail with a clear message
-      if (creditExhausted && allTransactions.length === 0) {
-        const errMsg = 'AI processing credits are exhausted. Please try again later or contact support.';
+      // If payment is required and we got nothing, fail with a clear message
+      if (paymentRequired && allTransactions.length === 0) {
+        const errMsg = 'AI service payment required. Please try again later or contact support.';
         await updateStatus(supabase, importId, 'failed', { file_hash: fileHash, error_message: errMsg });
         return json({ success: false, error: errMsg }, 503);
       }

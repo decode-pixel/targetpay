@@ -376,13 +376,16 @@ serve(async (req) => {
         allTransactions = parsed.transactions || [];
       } catch (err: any) {
         console.error('[parse] AI error:', err.message);
-        const errorMsg = err.message?.includes('TIMEOUT')
-          ? 'Processing timed out. Please try a smaller file.'
-          : err.message?.includes('429')
-            ? 'Service is busy. Please try again in a minute.'
-            : 'Failed to extract transactions. Please try again.';
+        const is402 = err.message?.includes('AI_HTTP_402');
+        const errorMsg = is402
+          ? 'AI processing credits are exhausted. Please try again later or contact support.'
+          : err.message?.includes('TIMEOUT')
+            ? 'Processing timed out. Please try a smaller file.'
+            : err.message?.includes('429')
+              ? 'Service is busy. Please try again in a minute.'
+              : 'Failed to extract transactions. Please try again.';
         await updateStatus(supabase, importId, 'failed', { error_message: errorMsg });
-        return json({ success: false, error: errorMsg }, 500);
+        return json({ success: false, error: errorMsg }, is402 ? 503 : 500);
       }
     } else {
       // Large PDF — chunked processing
@@ -408,6 +411,7 @@ serve(async (req) => {
         }
       }
 
+      let creditExhausted = false;
       for (let i = 0; i < chunks.length; i++) {
         console.log(`[parse] Processing chunk ${i + 1}/${chunks.length}`);
         
@@ -433,7 +437,12 @@ serve(async (req) => {
           allTransactions.push(...txs);
         } catch (err: any) {
           console.error(`[parse] Chunk ${i + 1} failed:`, err.message);
-          // Continue with other chunks — don't fail the whole import
+          // If AI credits are exhausted, abort immediately — no point processing remaining chunks
+          if (err.message?.includes('AI_HTTP_402')) {
+            creditExhausted = true;
+            break;
+          }
+          // Continue with other chunks for non-credit errors
           continue;
         }
         
@@ -442,6 +451,13 @@ serve(async (req) => {
           await new Promise(r => setTimeout(r, 1000));
         }
       }
+
+      // If credits ran out and we got nothing, fail with a clear message
+      if (creditExhausted && allTransactions.length === 0) {
+        const errMsg = 'AI processing credits are exhausted. Please try again later or contact support.';
+        await updateStatus(supabase, importId, 'failed', { file_hash: fileHash, error_message: errMsg });
+        return json({ success: false, error: errMsg }, 503);
+      }
     }
 
     // Handle AI-reported errors
@@ -449,9 +465,9 @@ serve(async (req) => {
       await updateStatus(supabase, importId, 'failed', {
         file_hash: fileHash,
         bank_name: bankName,
-        error_message: 'No transactions found in this statement.',
+        error_message: 'No transactions found in this statement. The PDF may not contain readable transaction data.',
       });
-      return json({ success: false, error: 'No transactions found' }, 400);
+      return json({ success: false, error: 'No transactions found in this statement' }, 400);
     }
 
     // Filter and deduplicate valid transactions

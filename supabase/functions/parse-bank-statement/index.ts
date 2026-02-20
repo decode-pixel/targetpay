@@ -3,7 +3,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { PDFDocument } from "https://esm.sh/@cantoo/pdf-lib@1.17.1";
-import { getDocument } from "https://esm.sh/pdfjs-serverless@0.6.0";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -142,24 +141,39 @@ If no transactions found, return: {"error": "no_transactions", "transactions": [
 Include both debit and credit transactions. Extract EVERY transaction — do not skip any.`;
 
 /**
- * Extract text from PDF using pdfjs-serverless (Deno-compatible, no worker needed).
+ * Extract readable text from PDF bytes using basic stream decoding.
+ * Lightweight, no external PDF library needed — works in Deno edge runtime.
  */
-async function extractTextFromPDF(pdfBytes: Uint8Array): Promise<string> {
-  try {
-    const doc = await getDocument(pdfBytes).promise;
-    let fullText = '';
-    for (let i = 1; i <= doc.numPages; i++) {
-      const page = await doc.getPage(i);
-      const content = await page.getTextContent();
-      fullText += content.items.map((item: any) => item.str).join(' ') + '\n';
+function extractTextFromPDF(pdfBytes: Uint8Array): string {
+  const raw = new TextDecoder('latin1').decode(pdfBytes);
+  const textChunks: string[] = [];
+
+  // Extract text from PDF stream objects (between BT...ET markers)
+  const btEtRegex = /BT\s([\s\S]*?)ET/g;
+  let match;
+  while ((match = btEtRegex.exec(raw)) !== null) {
+    const block = match[1];
+    // Extract text from Tj operator
+    const tjRegex = /\(([^)]*)\)\s*Tj/g;
+    let tjMatch;
+    while ((tjMatch = tjRegex.exec(block)) !== null) {
+      textChunks.push(tjMatch[1]);
     }
-    const result = fullText.trim();
-    console.log(`[extractTextFromPDF] Extracted ${result.length} chars from ${doc.numPages} pages`);
-    return result;
-  } catch (err) {
-    console.error('[extractTextFromPDF] Error:', err);
-    throw new Error('Failed to extract text from PDF');
+    // TJ arrays: [(text) kern (text) ...]
+    const tjArrayRegex = /\[([\s\S]*?)\]\s*TJ/gi;
+    let arrMatch;
+    while ((arrMatch = tjArrayRegex.exec(block)) !== null) {
+      const innerRegex = /\(([^)]*)\)/g;
+      let innerMatch;
+      while ((innerMatch = innerRegex.exec(arrMatch[1])) !== null) {
+        textChunks.push(innerMatch[1]);
+      }
+    }
   }
+
+  const result = textChunks.join(' ').replace(/\\r|\\n/g, ' ').replace(/\s+/g, ' ').trim();
+  console.log(`[extractTextFromPDF] Extracted ${result.length} chars`);
+  return result;
 }
 
 /**

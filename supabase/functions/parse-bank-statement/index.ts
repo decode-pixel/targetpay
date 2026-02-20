@@ -3,7 +3,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { PDFDocument } from "https://esm.sh/@cantoo/pdf-lib@1.17.1";
-import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.4.168";
+import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.4.168/legacy/build/pdf.mjs";
+
+// Disable worker for Deno edge runtime
+pdfjsLib.GlobalWorkerOptions.workerSrc = "";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -81,13 +84,11 @@ function parseJsonFromAI(content: string): any {
   if (fenceMatch) {
     try { return JSON.parse(fenceMatch[1].trim()); } catch { /* continue */ }
   }
-  // Try to find a JSON array or object
   const jsonStart = content.indexOf('{');
   const jsonEnd = content.lastIndexOf('}');
   if (jsonStart !== -1 && jsonEnd > jsonStart) {
     try { return JSON.parse(content.slice(jsonStart, jsonEnd + 1)); } catch { /* continue */ }
   }
-  // Try to find a JSON array (for chunked responses)
   const arrStart = content.indexOf('[');
   const arrEnd = content.lastIndexOf(']');
   if (arrStart !== -1 && arrEnd > arrStart) {
@@ -96,16 +97,12 @@ function parseJsonFromAI(content: string): any {
   throw new Error('Could not parse JSON from AI response');
 }
 
-/**
- * Split a PDF into page-range chunks for batch AI processing.
- * Returns base64 strings for each chunk.
- */
 async function splitPdfIntoChunks(pdfBytes: Uint8Array, pagesPerChunk: number): Promise<Uint8Array[]> {
   const srcDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
   const totalPages = srcDoc.getPageCount();
   
   if (totalPages <= pagesPerChunk) {
-    return [pdfBytes]; // No need to split
+    return [pdfBytes];
   }
 
   const chunks: Uint8Array[] = [];
@@ -147,19 +144,19 @@ Return ONLY valid JSON, NO markdown fences, NO extra text:
 If no transactions found, return: {"error": "no_transactions", "transactions": []}
 Include both debit and credit transactions. Extract EVERY transaction — do not skip any.`;
 
+/**
+ * Extract text from PDF using pdfjs-dist (legacy build, no worker needed).
+ */
 async function extractTextFromPDF(pdfBytes: Uint8Array): Promise<string> {
   try {
-    const pdfData = new Uint8Array(pdfBytes);
-    const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+    const pdf = await pdfjsLib.getDocument({ data: pdfBytes, useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true }).promise;
     let fullText = '';
-
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
       const pageText = textContent.items.map((item: any) => item.str).join(' ');
       fullText += pageText + '\n';
     }
-
     return fullText.trim();
   } catch (err) {
     console.error('[extractTextFromPDF] Error:', err);
@@ -167,13 +164,15 @@ async function extractTextFromPDF(pdfBytes: Uint8Array): Promise<string> {
   }
 }
 
+/**
+ * Call AI with extracted PDF text.
+ */
 async function callAI(apiKey: string, pdfText: string, isChunk: boolean, retryCount = 0): Promise<any> {
   const userMsg = isChunk
     ? 'Extract ALL transactions from this page/section of the bank statement. Return them as JSON.'
     : 'Extract all transactions from this bank statement PDF.';
 
   const controller = new AbortController();
-  // 120s timeout for large files
   const timeoutId = setTimeout(() => controller.abort(), 120000);
 
   try {
@@ -186,10 +185,7 @@ async function callAI(apiKey: string, pdfText: string, isChunk: boolean, retryCo
       body: JSON.stringify({
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
-          {
-            role: 'user',
-            content: `${userMsg}\n\n${pdfText}`,
-          },
+          { role: 'user', content: `${userMsg}\n\n${pdfText}` },
         ],
         temperature: 0.1,
         max_tokens: 64000,
@@ -202,15 +198,11 @@ async function callAI(apiKey: string, pdfText: string, isChunk: boolean, retryCo
     if (!response.ok) {
       const errText = await response.text().catch(() => 'Unknown');
       console.error(`[callAI] HTTP ${response.status}:`, errText);
-
-      // Retry on 429 (rate limit) up to 2 times with backoff
       if (response.status === 429 && retryCount < 2) {
         const waitMs = (retryCount + 1) * 5000;
-        console.log(`[callAI] Rate limited, waiting ${waitMs}ms before retry ${retryCount + 1}`);
         await new Promise(r => setTimeout(r, waitMs));
         return callAI(apiKey, pdfText, isChunk, retryCount + 1);
       }
-
       throw new Error(`AI_HTTP_${response.status}`);
     }
 
@@ -223,11 +215,7 @@ async function callAI(apiKey: string, pdfText: string, isChunk: boolean, retryCo
   } catch (err: any) {
     clearTimeout(timeoutId);
     if (err instanceof DOMException && err.name === 'AbortError') {
-      // Retry timeout once
-      if (retryCount < 1) {
-        console.log('[callAI] Timeout, retrying...');
-        return callAI(apiKey, pdfText, isChunk, retryCount + 1);
-      }
+      if (retryCount < 1) return callAI(apiKey, pdfText, isChunk, retryCount + 1);
       throw new Error('AI_TIMEOUT');
     }
     throw err;
@@ -332,7 +320,7 @@ serve(async (req) => {
       pdfBytes = new Uint8Array(fileBuffer);
     }
 
-    // AI EXTRACTION with chunked processing
+    // AI EXTRACTION
     await updateStatus(supabase, importId, 'processing', { file_hash: fileHash });
 
     // Duplicate check
@@ -358,34 +346,31 @@ serve(async (req) => {
       return json({ success: false, error: 'AI service not configured' }, 500);
     }
 
-    // Determine if we need to chunk the PDF
-    let srcDoc: any;
+    // Determine page count for chunking
     let totalPages = 1;
     try {
-      srcDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+      const srcDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
       totalPages = srcDoc.getPageCount();
     } catch {
-      // If we can't load to count pages, just send the whole thing
       totalPages = 1;
     }
 
     console.log(`[parse] PDF has ${totalPages} pages`);
 
-    const PAGES_PER_CHUNK = 8; // Process 8 pages at a time
+    const PAGES_PER_CHUNK = 8;
     let allTransactions: any[] = [];
     let bankName: string | null = null;
     let periodStart: string | null = null;
     let periodEnd: string | null = null;
 
     if (totalPages <= PAGES_PER_CHUNK) {
-      // Small PDF — single call
+      // Small PDF — extract text then send to AI
       try {
         const pdfText = await extractTextFromPDF(pdfBytes);
-        if (pdfText.length === 0) {
+        if (!pdfText || pdfText.length === 0) {
           await updateStatus(supabase, importId, 'failed', { error_message: 'Could not extract text from PDF.' });
           return json({ success: false, error: 'Could not extract text from PDF' }, 400);
         }
-
         const parsed = await callAI(BYTEZ_API_KEY, pdfText, false);
         bankName = parsed.bankName || null;
         periodStart = parsed.periodStart || null;
@@ -412,20 +397,15 @@ serve(async (req) => {
         chunks = await splitPdfIntoChunks(pdfBytes, PAGES_PER_CHUNK);
       } catch (splitErr) {
         console.error('[parse] Failed to split PDF:', splitErr);
-        // Fallback: try the whole file
+        // Fallback: send the whole file
         try {
-          const pdfText = await extractTextFromPDF(pdfBytes);
-          if (pdfText.length === 0) {
-            await updateStatus(supabase, importId, 'failed', { error_message: 'Could not extract text from PDF.' });
-            return json({ success: false, error: 'Could not extract text from PDF' }, 400);
-          }
-
-          const parsed = await callAI(BYTEZ_API_KEY, pdfText, false);
+          const fallbackText = await extractTextFromPDF(pdfBytes);
+          const parsed = await callAI(BYTEZ_API_KEY, fallbackText, false);
           bankName = parsed.bankName || null;
           periodStart = parsed.periodStart || null;
           periodEnd = parsed.periodEnd || null;
           allTransactions = parsed.transactions || [];
-          chunks = []; // Skip chunked processing
+          chunks = [];
         } catch (err: any) {
           console.error('[parse] Fallback AI error:', err.message);
           await updateStatus(supabase, importId, 'failed', { error_message: 'Failed to process large PDF.' });
@@ -437,26 +417,22 @@ serve(async (req) => {
       for (let i = 0; i < chunks.length; i++) {
         console.log(`[parse] Processing chunk ${i + 1}/${chunks.length}`);
 
-        // Update status with progress
         await updateStatus(supabase, importId, 'processing', {
           error_message: `Processing page ${i * PAGES_PER_CHUNK + 1}-${Math.min((i + 1) * PAGES_PER_CHUNK, totalPages)} of ${totalPages}...`,
         });
 
         try {
           const chunkText = await extractTextFromPDF(chunks[i]);
-          if (chunkText.length === 0) {
-            console.log(`[parse] Chunk ${i + 1} has no extractable text, skipping`);
+          if (!chunkText || chunkText.length === 0) {
+            console.log(`[parse] Chunk ${i + 1} empty, skipping`);
             continue;
           }
-
           const parsed = await callAI(BYTEZ_API_KEY, chunkText, true);
 
-          // Capture metadata from first chunk
           if (i === 0) {
             bankName = parsed.bankName || null;
             periodStart = parsed.periodStart || null;
           }
-          // Update periodEnd from last chunk
           if (parsed.periodEnd) periodEnd = parsed.periodEnd;
 
           const txs = parsed.transactions || [];
@@ -464,22 +440,18 @@ serve(async (req) => {
           allTransactions.push(...txs);
         } catch (err: any) {
           console.error(`[parse] Chunk ${i + 1} failed:`, err.message);
-          // If payment is required, abort immediately — no point processing remaining chunks
           if (err.message?.includes('AI_HTTP_402')) {
             paymentRequired = true;
             break;
           }
-          // Continue with other chunks for non-payment errors
           continue;
         }
 
-        // Small delay between chunks to avoid rate limiting
         if (i < chunks.length - 1) {
           await new Promise(r => setTimeout(r, 1000));
         }
       }
 
-      // If payment is required and we got nothing, fail with a clear message
       if (paymentRequired && allTransactions.length === 0) {
         const errMsg = 'AI service payment required. Please try again later or contact support.';
         await updateStatus(supabase, importId, 'failed', { file_hash: fileHash, error_message: errMsg });
@@ -487,7 +459,7 @@ serve(async (req) => {
       }
     }
 
-    // Handle AI-reported errors
+    // Handle no transactions
     if (allTransactions.length === 0) {
       await updateStatus(supabase, importId, 'failed', {
         file_hash: fileHash,
@@ -497,11 +469,10 @@ serve(async (req) => {
       return json({ success: false, error: 'No transactions found in this statement' }, 400);
     }
 
-    // Filter and deduplicate valid transactions
+    // Filter and deduplicate
     const seenKeys = new Set<string>();
     const validTransactions = allTransactions.filter((t: any) => {
       if (!t || !t.date || t.amount === undefined || t.amount === null) return false;
-      // Deduplicate across chunks (same date + amount + description)
       const key = `${t.date}_${t.amount}_${(t.description || '').slice(0, 30)}`;
       if (seenKeys.has(key)) return false;
       seenKeys.add(key);
@@ -552,7 +523,6 @@ serve(async (req) => {
         .insert(batch);
       if (insertErr) {
         console.error(`[parse] Insert batch ${i}-${i + batch.length} error:`, insertErr);
-        // Try inserting one by one for the failed batch
         for (const row of batch) {
           const { error: singleErr } = await supabase
             .from('extracted_transactions')

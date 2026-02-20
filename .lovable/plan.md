@@ -1,66 +1,47 @@
 
 
-# Fix UI Reactivity: Instant Updates for Profile Save and Budget Mode
+# Ready TargetPay for Final Publish
 
-## Problems Found
+## Current Issue: Blank Screen
 
-1. **Profile Save**: The `useUpdateProfile` hook fires `invalidateQueries` without awaiting it, so the success toast appears before the UI actually refreshes with new data. The `hasChanges` flag also has a stale dependency in the `useEffect` sync.
+The app shows a blank white screen due to a `supabaseUrl is required` error. This happened because the external GitHub sync caused Vite's environment variable cache to become stale. The `.env` file and `client.ts` are both correct, but the build isn't picking up the env vars.
 
-2. **Budget Mode Selector**: The `useUpdateFinancialSettings` hook only invalidates `financial-settings` queries. It does NOT invalidate downstream queries that depend on settings (budget rules, category budgets, expenses). This means the dashboard, health score, alerts, and budget cards all show stale values until the user manually navigates away and back.
+## Fix Plan
 
----
+### Step 1: Trigger a rebuild by making a trivial change
 
-## Fix 1: `src/hooks/useProfile.ts` -- Await Invalidation, Then Toast
+Since `src/integrations/supabase/client.ts` and `.env` are auto-generated and cannot be edited, the simplest fix is to make a no-op change to any source file (e.g., add a comment to `src/main.tsx`) to force Vite to do a full rebuild and re-read the `.env` file. This is a standard fix after external syncs.
 
-Change `onSuccess` to an async function that awaits `invalidateQueries` before showing the toast:
+Alternatively, if the env vars are truly missing, I will verify by checking the `.env` contents and ensuring the auto-generated client gets regenerated.
 
-```typescript
-onSuccess: async () => {
-  await queryClient.invalidateQueries({ queryKey: ['profile'] });
-  toast.success('Profile updated');
-},
-```
+### Step 2: Verify the app loads
 
-This ensures the profile query refetches and updates the UI BEFORE the success message appears.
+After the rebuild triggers, confirm:
+- Auth page renders with the TargetPay logo
+- No console errors about missing Supabase URL
+- Navigation works across all routes
 
-## Fix 2: `src/pages/Profile.tsx` -- Reset hasChanges Properly
+### Step 3: Deploy edge functions
 
-The `useEffect` that syncs `fullName` from profile data skips when `hasChanges` is true, but after a successful save `hasChanges` is reset in `handleSave` -- however the timing can race. Fix by resetting `hasChanges` inside `onSuccess` of the mutation, or by using `onSettled`. The current approach in `handleSave` already resets it after `mutateAsync`, which is correct since `mutateAsync` awaits. No change needed here once the hook awaits properly.
+Redeploy all 5 edge functions to ensure they match the latest code:
+- `parse-bank-statement`
+- `categorize-transactions`
+- `import-transactions`
+- `budget-insights`
 
-## Fix 3: `src/hooks/useFinancialSettings.ts` -- Invalidate All Dependent Queries
+### Step 4: Final verification checklist
 
-Change `onSuccess` in `useUpdateFinancialSettings` to await invalidation of ALL dependent query keys:
+- Frontend builds without errors
+- Auth flow works (login/signup)
+- Dashboard loads with data
+- Edge functions respond correctly
+- PWA manifest loads properly
 
-```typescript
-onSuccess: async () => {
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: ['financial-settings'] }),
-    queryClient.invalidateQueries({ queryKey: ['categories'] }),
-    queryClient.invalidateQueries({ queryKey: ['expenses'] }),
-    queryClient.invalidateQueries({ queryKey: ['category-budgets'] }),
-  ]);
-  toast.success('Settings saved');
-},
-```
-
-This ensures that when the user switches between Flexible/Guided/Strict:
-- Budget health score recalculates immediately
-- Budget alerts update thresholds instantly
-- Category budget cards re-render with correct styling
-- Dashboard stat cards reflect the new mode
-
-## Fix 4: `src/components/budget/FinancialSettingsCard.tsx` -- Optimistic Local State
-
-The `handleModeChange` function already updates local state (`setBudgetMode`) before calling `mutateAsync`, which is correct for instant visual feedback on the live preview card. No change needed here -- the fix is in the hook's `onSuccess` propagating changes to other components.
-
----
-
-## Summary of File Changes
+## Files to Modify
 
 | File | Change |
 |------|--------|
-| `src/hooks/useProfile.ts` | Await `invalidateQueries` before toast in `onSuccess` |
-| `src/hooks/useFinancialSettings.ts` | Await invalidation of `financial-settings`, `categories`, `expenses`, `category-budgets` in `onSuccess` |
+| `src/main.tsx` | Trivial rebuild trigger (add/update comment) |
 
-Two files modified. No new files. No database changes. No new dependencies.
+One minor touch to force rebuild. All edge functions redeployed. No logic changes, no new dependencies, no database changes.
 

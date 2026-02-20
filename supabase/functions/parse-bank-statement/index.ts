@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { PDFDocument } from "https://esm.sh/@cantoo/pdf-lib@1.17.1";
+import { getDocument } from "https://esm.sh/pdfjs-serverless@0.6.0";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -140,66 +141,25 @@ Return ONLY valid JSON, NO markdown fences, NO extra text:
 If no transactions found, return: {"error": "no_transactions", "transactions": []}
 Include both debit and credit transactions. Extract EVERY transaction — do not skip any.`;
 
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
 /**
- * Extract text from PDF using Gemini's native PDF understanding via Lovable AI gateway.
+ * Extract text from PDF using pdfjs-serverless (Deno-compatible, no worker needed).
  */
 async function extractTextFromPDF(pdfBytes: Uint8Array): Promise<string> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-  if (!LOVABLE_API_KEY) {
-    throw new Error('LOVABLE_API_KEY is not set');
-  }
-
-  const base64Pdf = arrayBufferToBase64(pdfBytes.buffer);
-
-  const response = await fetch('https://api.lovable.dev/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-2.5-flash',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: 'Extract ALL text content from this PDF document. Return ONLY the raw extracted text, preserving the table structure as much as possible. Do not add any commentary.' },
-            {
-              type: 'image_url',
-              image_url: {
-                url: `data:application/pdf;base64,${base64Pdf}`,
-              },
-            },
-          ],
-        },
-      ],
-      temperature: 0,
-      max_tokens: 64000,
-    }),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text().catch(() => 'Unknown');
-    console.error(`[extractTextFromPDF] Gemini HTTP ${response.status}:`, errText);
+  try {
+    const doc = await getDocument(pdfBytes).promise;
+    let fullText = '';
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      fullText += content.items.map((item: any) => item.str).join(' ') + '\n';
+    }
+    const result = fullText.trim();
+    console.log(`[extractTextFromPDF] Extracted ${result.length} chars from ${doc.numPages} pages`);
+    return result;
+  } catch (err) {
+    console.error('[extractTextFromPDF] Error:', err);
     throw new Error('Failed to extract text from PDF');
   }
-
-  const result = await response.json();
-  const text = result.choices?.[0]?.message?.content;
-  if (!text || text.trim().length === 0) {
-    throw new Error('Failed to extract text from PDF - empty response');
-  }
-  console.log(`[extractTextFromPDF] Extracted ${text.length} chars`);
-  return text.trim();
 }
 
 /**

@@ -113,6 +113,11 @@ async function splitPdfIntoChunks(pdfBytes: Uint8Array, pagesPerChunk: number): 
   return chunks;
 }
 
+/** Convert Uint8Array to base64 string */
+function arrayBufferToBase64(bytes: Uint8Array): string {
+  return base64Encode(bytes);
+}
+
 const SYSTEM_PROMPT = `You are a bank statement parser. Extract ALL transactions from the provided bank statement PDF.
 
 For each transaction extract:
@@ -141,8 +146,103 @@ If no transactions found, return: {"error": "no_transactions", "transactions": [
 Include both debit and credit transactions. Extract EVERY transaction — do not skip any.`;
 
 /**
- * Extract readable text from PDF bytes using basic stream decoding.
- * Lightweight, no external PDF library needed — works in Deno edge runtime.
+ * Call Bytez GPT-4o with PDF bytes as base64 image_url (GPT-4o document understanding).
+ * Falls back to text-only if image_url approach fails.
+ */
+async function callAI(
+  apiKey: string,
+  pdfBytes: Uint8Array,
+  isChunk: boolean,
+  retryCount = 0
+): Promise<any> {
+  const userMsg = isChunk
+    ? 'Extract ALL transactions from this page/section of the bank statement. Return them as JSON.'
+    : 'Extract all transactions from this bank statement PDF.';
+
+  const pdfBase64 = arrayBufferToBase64(pdfBytes);
+  console.log(`[callAI] Sending ${pdfBytes.byteLength} bytes as base64 (${pdfBase64.length} chars), chunk=${isChunk}, retry=${retryCount}`);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+  try {
+    // Send PDF as base64 via image_url content type (GPT-4o document understanding)
+    const response = await fetch('https://api.bytez.com/models/v2/openai/gpt-4o', {
+      method: 'POST',
+      headers: {
+        'Authorization': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: userMsg },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:application/pdf;base64,${pdfBase64}`,
+                },
+              },
+            ],
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 64000,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => 'Unknown');
+      console.error(`[callAI] HTTP ${response.status}:`, errText);
+
+      // If 400/415 (unsupported media), fall back to text extraction
+      if ((response.status === 400 || response.status === 415) && retryCount === 0) {
+        console.log('[callAI] base64 PDF not supported, falling back to text extraction');
+        return callAIWithText(apiKey, pdfBytes, isChunk, 0);
+      }
+
+      if (response.status === 429 && retryCount < 2) {
+        const waitMs = (retryCount + 1) * 5000;
+        await new Promise(r => setTimeout(r, waitMs));
+        return callAI(apiKey, pdfBytes, isChunk, retryCount + 1);
+      }
+      throw new Error(`AI_HTTP_${response.status}`);
+    }
+
+    const result = await response.json();
+    const content = result.choices?.[0]?.message?.content;
+    if (!content || content.trim().length === 0) {
+      // If empty response with base64, try text fallback
+      if (retryCount === 0) {
+        console.log('[callAI] Empty response from base64 approach, trying text fallback');
+        return callAIWithText(apiKey, pdfBytes, isChunk, 0);
+      }
+      throw new Error('EMPTY_RESPONSE');
+    }
+    return parseJsonFromAI(content);
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      if (retryCount < 1) return callAI(apiKey, pdfBytes, isChunk, retryCount + 1);
+      throw new Error('AI_TIMEOUT');
+    }
+    // For other errors on first try, attempt text fallback
+    if (retryCount === 0 && !err.message?.includes('AI_HTTP_402') && !err.message?.includes('AI_HTTP_429')) {
+      console.log('[callAI] Error with base64, trying text fallback:', err.message);
+      return callAIWithText(apiKey, pdfBytes, isChunk, 0);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Fallback: Extract text from PDF using basic stream parsing, then send text to AI.
  */
 function extractTextFromPDF(pdfBytes: Uint8Array): string {
   const raw = new TextDecoder('latin1').decode(pdfBytes);
@@ -153,13 +253,11 @@ function extractTextFromPDF(pdfBytes: Uint8Array): string {
   let match;
   while ((match = btEtRegex.exec(raw)) !== null) {
     const block = match[1];
-    // Extract text from Tj operator
     const tjRegex = /\(([^)]*)\)\s*Tj/g;
     let tjMatch;
     while ((tjMatch = tjRegex.exec(block)) !== null) {
       textChunks.push(tjMatch[1]);
     }
-    // TJ arrays: [(text) kern (text) ...]
     const tjArrayRegex = /\[([\s\S]*?)\]\s*TJ/gi;
     let arrMatch;
     while ((arrMatch = tjArrayRegex.exec(block)) !== null) {
@@ -177,12 +275,24 @@ function extractTextFromPDF(pdfBytes: Uint8Array): string {
 }
 
 /**
- * Call AI with extracted PDF text.
+ * Text-based fallback AI call: extract text from PDF, send as plain text.
  */
-async function callAI(apiKey: string, pdfText: string, isChunk: boolean, retryCount = 0): Promise<any> {
+async function callAIWithText(
+  apiKey: string,
+  pdfBytes: Uint8Array,
+  isChunk: boolean,
+  retryCount = 0
+): Promise<any> {
+  const pdfText = extractTextFromPDF(pdfBytes);
+  if (!pdfText || pdfText.length < 20) {
+    throw new Error('TEXT_EXTRACTION_EMPTY');
+  }
+
   const userMsg = isChunk
     ? 'Extract ALL transactions from this page/section of the bank statement. Return them as JSON.'
     : 'Extract all transactions from this bank statement PDF.';
+
+  console.log(`[callAIWithText] Sending ${pdfText.length} chars of text, chunk=${isChunk}, retry=${retryCount}`);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 120000);
@@ -209,11 +319,11 @@ async function callAI(apiKey: string, pdfText: string, isChunk: boolean, retryCo
 
     if (!response.ok) {
       const errText = await response.text().catch(() => 'Unknown');
-      console.error(`[callAI] HTTP ${response.status}:`, errText);
+      console.error(`[callAIWithText] HTTP ${response.status}:`, errText);
       if (response.status === 429 && retryCount < 2) {
         const waitMs = (retryCount + 1) * 5000;
         await new Promise(r => setTimeout(r, waitMs));
-        return callAI(apiKey, pdfText, isChunk, retryCount + 1);
+        return callAIWithText(apiKey, pdfBytes, isChunk, retryCount + 1);
       }
       throw new Error(`AI_HTTP_${response.status}`);
     }
@@ -227,7 +337,7 @@ async function callAI(apiKey: string, pdfText: string, isChunk: boolean, retryCo
   } catch (err: any) {
     clearTimeout(timeoutId);
     if (err instanceof DOMException && err.name === 'AbortError') {
-      if (retryCount < 1) return callAI(apiKey, pdfText, isChunk, retryCount + 1);
+      if (retryCount < 1) return callAIWithText(apiKey, pdfBytes, isChunk, retryCount + 1);
       throw new Error('AI_TIMEOUT');
     }
     throw err;
@@ -376,14 +486,9 @@ serve(async (req) => {
     let periodEnd: string | null = null;
 
     if (totalPages <= PAGES_PER_CHUNK) {
-      // Small PDF — extract text then send to AI
+      // Small PDF — send base64 bytes directly to GPT-4o
       try {
-        const pdfText = await extractTextFromPDF(pdfBytes);
-        if (!pdfText || pdfText.length === 0) {
-          await updateStatus(supabase, importId, 'failed', { error_message: 'Could not extract text from PDF.' });
-          return json({ success: false, error: 'Could not extract text from PDF' }, 400);
-        }
-        const parsed = await callAI(BYTEZ_API_KEY, pdfText, false);
+        const parsed = await callAI(BYTEZ_API_KEY, pdfBytes, false);
         bankName = parsed.bankName || null;
         periodStart = parsed.periodStart || null;
         periodEnd = parsed.periodEnd || null;
@@ -397,7 +502,9 @@ serve(async (req) => {
             ? 'Processing timed out. Please try a smaller file.'
             : err.message?.includes('429')
               ? 'Service is busy. Please try again in a minute.'
-              : 'Failed to extract transactions. Please try again.';
+              : err.message?.includes('TEXT_EXTRACTION_EMPTY')
+                ? 'Could not extract readable text from this PDF. The file may be scanned or image-based.'
+                : 'Failed to extract transactions. Please try again.';
         await updateStatus(supabase, importId, 'failed', { error_message: errorMsg });
         return json({ success: false, error: errorMsg }, is402 ? 503 : 500);
       }
@@ -411,8 +518,7 @@ serve(async (req) => {
         console.error('[parse] Failed to split PDF:', splitErr);
         // Fallback: send the whole file
         try {
-          const fallbackText = await extractTextFromPDF(pdfBytes);
-          const parsed = await callAI(BYTEZ_API_KEY, fallbackText, false);
+          const parsed = await callAI(BYTEZ_API_KEY, pdfBytes, false);
           bankName = parsed.bankName || null;
           periodStart = parsed.periodStart || null;
           periodEnd = parsed.periodEnd || null;
@@ -434,12 +540,7 @@ serve(async (req) => {
         });
 
         try {
-          const chunkText = await extractTextFromPDF(chunks[i]);
-          if (!chunkText || chunkText.length === 0) {
-            console.log(`[parse] Chunk ${i + 1} empty, skipping`);
-            continue;
-          }
-          const parsed = await callAI(BYTEZ_API_KEY, chunkText, true);
+          const parsed = await callAI(BYTEZ_API_KEY, chunks[i], true);
 
           if (i === 0) {
             bankName = parsed.bankName || null;
